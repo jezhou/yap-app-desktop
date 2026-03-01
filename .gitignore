@@ -36,5 +36,11 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# TypeScript build info
+*.tsbuildinfo
+
+# Vite declaration output
+vite.config.d.ts
+
 # Tauri
 src-tauri/target/

@@ -94,6 +94,7 @@ Full constitution: `.specify/memory/constitution.md`
 ## Feature Specs (Speckit)
 
 Features are specified in `specs/<feature-id>/` with these artifacts:
+
 - `spec.md` — requirements and acceptance scenarios
 - `plan.md` — architecture and implementation plan
 - `tasks.md` — ordered implementation tasks
@@ -118,14 +119,16 @@ When implementing a feature, follow this process:
 
 The orchestrating agent acts as **Maya (PM)** — creating tasks from `tasks.md`, assigning work, gating phases, and enforcing the spec. Six agents are spawned:
 
-| Agent | Persona | Focus |
-|-------|---------|-------|
-| `architect` | Kai | Spec compliance, contract validation, constitution checks |
-| `dev-rust` | Russ | All `src-tauri/` — models, services, commands, migrations |
-| `dev-frontend` | Tess | All `src/` — components, pages, services, hooks, types |
-| `qa-functional` | Val | Acceptance tests, edge case coverage, spec scenario validation |
-| `qa-integration` | Seb | Data integrity, cascade ops, state transitions, cross-story flows |
-| `designer` | Ren | Visual consistency, dark theme, accessibility, design reference alignment |
+| Agent            | Persona | Focus                                                                     |
+| ---------------- | ------- | ------------------------------------------------------------------------- |
+| `architect`      | Kai     | Spec compliance, contract validation, constitution checks                 |
+| `dev-rust`       | Russ    | All `src-tauri/` — models, services, commands, migrations                 |
+| `dev-frontend`   | Tess    | All `src/` — components, pages, services, hooks, types                    |
+| `qa-functional`  | Val     | Acceptance tests, edge case coverage, spec scenario validation            |
+| `qa-integration` | Seb     | Data integrity, cascade ops, state transitions, cross-story flows         |
+| `designer`       | Ren     | Visual consistency, dark theme, accessibility, design reference alignment |
+
+Work completed by these agents should regularly be commited, with agent attribution, and pushed to the remote repository.
 
 ### Pipeline
 
