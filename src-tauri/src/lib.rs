@@ -17,6 +17,11 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
 
+            // Ensure the audio files directory exists
+            let audio_dir = app_data_dir.join("audio");
+            std::fs::create_dir_all(&audio_dir)
+                .expect("failed to create audio directory");
+
             let rt = tokio::runtime::Runtime::new()
                 .expect("failed to create tokio runtime");
             let database = rt
@@ -27,6 +32,39 @@ pub fn run() {
 
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            // Audio
+            commands::audio::upload_audio,
+            commands::audio::play_audio,
+            commands::audio::pause_audio,
+            commands::audio::get_audio_position,
+            // Transcription
+            commands::transcription::start_transcription,
+            commands::transcription::cancel_transcription,
+            // Sessions
+            commands::sessions::create_session,
+            commands::sessions::list_sessions,
+            commands::sessions::update_session,
+            commands::sessions::delete_session,
+            // Conversations
+            commands::conversations::list_conversations,
+            commands::conversations::get_conversation_detail,
+            commands::conversations::rename_conversation,
+            commands::conversations::delete_conversation,
+            commands::conversations::update_speaker_role,
+            // Search
+            commands::search::search_conversations,
+            // Export
+            commands::export::export_markdown,
+            commands::export::export_pdf,
+            // Settings
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            commands::settings::list_available_models,
+            commands::settings::download_model,
+            commands::settings::delete_model,
+            commands::settings::get_diarization_status,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
