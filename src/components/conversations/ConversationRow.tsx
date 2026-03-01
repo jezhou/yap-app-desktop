@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import StatusBadge from "../shared/StatusBadge";
 import type { Conversation } from "../../types";
 
 interface ConversationRowProps {
@@ -14,13 +15,6 @@ function formatDuration(seconds: number): string {
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  completed: "bg-success/10 text-success",
-  analyzing: "bg-warning/10 text-warning",
-  uploading: "bg-accent/10 text-accent",
-  error: "bg-error/10 text-error",
-};
 
 export default function ConversationRow({
   conversation,
@@ -42,7 +36,6 @@ export default function ConversationRow({
   }
 
   const date = new Date(conversation.created_at).toLocaleDateString();
-  const statusStyle = STATUS_STYLES[conversation.status] ?? "";
 
   return (
     <tr
@@ -75,11 +68,7 @@ export default function ConversationRow({
         )}
       </td>
       <td className="px-4 py-3">
-        <span
-          className={`text-xs px-2 py-0.5 rounded-full capitalize ${statusStyle}`}
-        >
-          {conversation.status}
-        </span>
+        <StatusBadge status={conversation.status} />
       </td>
       <td className="px-4 py-3 text-sm text-text-muted">{date}</td>
       <td className="px-4 py-3 text-sm text-text-muted font-mono">
