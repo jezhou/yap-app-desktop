@@ -1,4 +1,5 @@
 pub mod audio_player;
+pub mod audio_validation;
 pub mod conversations;
 pub mod exporter;
 pub mod search;

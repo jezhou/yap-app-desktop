@@ -121,7 +121,7 @@ mod tests {
 
         // Verify tables exist by querying sqlite_master
         let tables: Vec<(String,)> = sqlx::query_as(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_%' ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
         )
         .fetch_all(db.pool())
         .await

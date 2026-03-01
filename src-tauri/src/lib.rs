@@ -35,6 +35,11 @@ pub fn run() {
                 Arc::new(services::audio_player::AudioPlayer::new());
             app.manage(audio_player);
 
+            // Initialize transcription state for cancellation tracking
+            let transcription_state: commands::transcription::TranscriptionStateHandle =
+                Arc::new(commands::transcription::TranscriptionState::new());
+            app.manage(transcription_state);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
