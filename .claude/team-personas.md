@@ -249,3 +249,43 @@ When someone wants to add something not in the spec:
 2. Maya checks spec.md — if it's there, approve; if not, reject with "v2"
 3. Only the user can override Maya's scope decisions
 4. Constitution violations cannot be overridden by anyone, including the user (escalate instead)
+
+---
+
+## Sprint Retrospective Learnings
+
+Lessons learned from the 001-voice-transcription sprint. Apply these in future sprints.
+
+### Agent Management
+
+1. **Spawn the full team upfront.** Don't start with one backend agent and scale reactively. For backend-heavy projects, spawn 2-3 Rust agents from the start to avoid pipeline bottlenecks.
+
+2. **Agents can get stuck in echo loops.** If an agent repeatedly confirms already-completed work, stop responding entirely. Every reply — even "stop" — triggers another round. Silence breaks the cycle.
+
+3. **Verify agent output by reading code, not trusting completion claims.** Use `grep` and `Read` to spot-check that functions are actually called, not just defined. An agent may report a task complete when critical wiring is missing.
+
+### QA Process
+
+4. **Run QA per-phase, not after all implementation.** Running QA only after all 56 tasks compounded bugs. Run QA at each phase checkpoint (as prescribed in Phase Gating above) to catch issues early.
+
+5. **Cross-boundary type audits are highest ROI.** Rust/TypeScript serde naming mismatches, return type shape differences, and missing fields are bugs that unit tests on either side alone won't catch. Prioritize Seb's type boundary review early.
+
+6. **QA bug reports must flow back to devs.** When QA finds bugs, Maya creates fix tasks with exact file paths, function names, and line numbers, then assigns to the original developer. Dev fixes → QA re-verifies. No phase advances while defects are open.
+
+### Orchestration
+
+7. **The orchestrator must NOT do implementation work.** Doing tasks yourself means you're not paying attention to blocked agents or verifying outputs. Focus purely on task routing, code verification, and commits.
+
+8. **Task descriptions must be hyper-specific.** Include exact file paths, function names, line numbers, and step-by-step instructions. Vague descriptions like "fix delete cascade" lead to partial implementations.
+
+9. **Commit and push regularly with agent attribution.** Establish this cadence from the start. Group logically related changes and note which agents contributed in the commit message.
+
+### Common Bug Patterns to Watch For
+
+- Delete operations clean up DB rows (CASCADE) but orphan filesystem artifacts and index entries
+- Rust/TypeScript serde naming mismatches (`camelCase` vs `snake_case`, `rename_all` attributes)
+- Return type shape mismatches (object vs array, flat map vs structured)
+- Missing guard checks before expensive operations (model downloaded? valid state transition?)
+- Frontend not consuming all fields from backend responses
+- First-run / setup flows not enforced (users can bypass wizards)
+- Platform-specific dependencies not declared in Cargo.toml (`windows-sys`, etc.)
