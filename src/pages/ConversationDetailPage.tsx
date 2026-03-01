@@ -5,10 +5,11 @@ import InsightsView from "../components/transcription/InsightsView";
 import UploadProgress from "../components/upload/UploadProgress";
 import { playAudio, pauseAudio, getAudioPosition } from "../services/audio";
 import { onTranscriptionProgress } from "../services/transcription";
+import { getConversationDetail } from "../services/conversations";
+import { updateSpeakerRole } from "../services/conversations";
 import type { ConversationDetail, ConversationStatus } from "../types";
-import { invoke } from "@tauri-apps/api/core";
 
-type Tab = "transcript" | "insights";
+type Tab = "transcript" | "insights" | "speakers";
 
 export default function ConversationDetailPage() {
   const { conversationId } = useParams<{
@@ -28,10 +29,7 @@ export default function ConversationDetailPage() {
   const loadDetail = useCallback(async () => {
     if (!conversationId) return;
     try {
-      const result = await invoke<ConversationDetail>(
-        "get_conversation_detail",
-        { conversationId },
-      );
+      const result = await getConversationDetail(conversationId);
       setDetail(result);
       setStatus(result.conversation.status);
     } catch {
@@ -190,6 +188,16 @@ export default function ConversationDetailPage() {
             >
               Insights
             </button>
+            <button
+              onClick={() => setActiveTab("speakers")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === "speakers"
+                  ? "border-accent text-accent"
+                  : "border-transparent text-text-muted hover:text-text"
+              }`}
+            >
+              Speakers
+            </button>
           </div>
 
           {activeTab === "transcript" && detail.transcription && (
@@ -204,8 +212,96 @@ export default function ConversationDetailPage() {
           {activeTab === "insights" && detail.summary && (
             <InsightsView content={detail.summary.content} />
           )}
+
+          {activeTab === "speakers" && (
+            <SpeakerRoleEditor
+              speakerRoles={detail.speakerRoles}
+              conversationId={detail.conversation.id}
+              onUpdate={loadDetail}
+            />
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+function SpeakerRoleEditor({
+  speakerRoles,
+  conversationId,
+  onUpdate,
+}: {
+  speakerRoles: ConversationDetail["speakerRoles"];
+  conversationId: string;
+  onUpdate: () => void;
+}) {
+  const [editingLabel, setEditingLabel] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  async function handleSave(speakerLabel: string) {
+    const trimmed = editName.trim();
+    if (!trimmed) return;
+    try {
+      await updateSpeakerRole(conversationId, speakerLabel, trimmed);
+      setEditingLabel(null);
+      onUpdate();
+    } catch {
+      // error handling at page level
+    }
+  }
+
+  if (speakerRoles.length === 0) {
+    return (
+      <p className="text-text-muted text-center py-8">
+        No speakers detected.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-text-muted">
+        Assign display names to detected speakers.
+      </p>
+      {speakerRoles.map((role) => (
+        <div
+          key={role.speaker_label}
+          className="flex items-center gap-3 p-3 bg-surface rounded-lg border border-border"
+        >
+          <span className="text-xs text-text-dim font-mono w-24">
+            {role.speaker_label}
+          </span>
+          {editingLabel === role.speaker_label ? (
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onBlur={() => handleSave(role.speaker_label)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSave(role.speaker_label);
+                if (e.key === "Escape") setEditingLabel(null);
+              }}
+              className="flex-1 bg-bg border border-border rounded px-2 py-1 text-sm text-text focus:outline-none focus:border-accent"
+              autoFocus
+            />
+          ) : (
+            <>
+              <span className="flex-1 text-sm text-text">
+                {role.display_name}
+              </span>
+              <button
+                onClick={() => {
+                  setEditingLabel(role.speaker_label);
+                  setEditName(role.display_name);
+                }}
+                className="text-xs text-text-dim hover:text-text transition-colors"
+              >
+                Edit
+              </button>
+            </>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
