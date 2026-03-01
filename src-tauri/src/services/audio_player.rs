@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
 /// Shared audio player state managed by Tauri.
 pub struct AudioPlayer {
@@ -28,6 +28,12 @@ struct PlayerInner {
     /// The accumulated position in seconds when last paused/seeked
     base_position: f64,
 }
+
+// SAFETY: PlayerInner is only accessed through a Mutex, ensuring
+// single-threaded access. rodio's OutputStream is not Send due to
+// platform audio backend raw pointers, but we guarantee exclusive
+// access via the Mutex.
+unsafe impl Send for PlayerInner {}
 
 impl AudioPlayer {
     pub fn new() -> Self {
@@ -56,12 +62,12 @@ impl AudioPlayer {
             inner.stream_handle = Some(handle);
         }
 
-        let handle = inner.stream_handle.as_ref().unwrap();
-
         // Stop any existing playback
         if let Some(old_sink) = inner.sink.take() {
             old_sink.stop();
         }
+
+        let handle = inner.stream_handle.as_ref().unwrap();
 
         // Open and decode the audio file
         let file = File::open(file_path)
@@ -72,7 +78,7 @@ impl AudioPlayer {
 
         // Get duration from the decoder if available
         let duration = source.total_duration()
-            .map(|d| d.as_secs_f64())
+            .map(|d: std::time::Duration| d.as_secs_f64())
             .unwrap_or(0.0);
 
         let sink = Sink::try_new(handle)

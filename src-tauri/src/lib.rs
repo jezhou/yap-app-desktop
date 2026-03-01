@@ -30,6 +30,11 @@ pub fn run() {
 
             app.manage(Arc::new(Mutex::new(database)) as db::DbState);
 
+            // Initialize audio player
+            let audio_player: services::audio_player::AudioPlayerState =
+                Arc::new(services::audio_player::AudioPlayer::new());
+            app.manage(audio_player);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
