@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SearchResult {
     pub conversation_id: String,
     pub session_id: String,
@@ -75,6 +74,7 @@ pub async fn search_conversations(
 }
 
 /// Populate the FTS index for a conversation. Called after transcription completes.
+/// Also stores the FTS rowid in `fts_rowid_map` so the entry can be deleted later.
 pub async fn index_conversation(pool: &SqlitePool, conversation_id: &str) -> Result<()> {
     let row: Option<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT s.title, c.title, t.full_text, sm.content
@@ -101,6 +101,49 @@ pub async fn index_conversation(pool: &SqlitePool, conversation_id: &str) -> Res
         .execute(pool)
         .await
         .context("failed to index conversation in FTS")?;
+
+        // Store the rowid so we can delete the FTS entry later
+        let fts_rowid: (i64,) = sqlx::query_as("SELECT last_insert_rowid()")
+            .fetch_one(pool)
+            .await
+            .context("failed to get FTS rowid")?;
+
+        sqlx::query(
+            "INSERT OR REPLACE INTO fts_rowid_map (conversation_id, fts_rowid) VALUES (?, ?)",
+        )
+        .bind(conversation_id)
+        .bind(fts_rowid.0)
+        .execute(pool)
+        .await
+        .context("failed to store FTS rowid mapping")?;
+    }
+
+    Ok(())
+}
+
+/// Delete the FTS index entry for a conversation. Call before deleting the conversation row.
+pub async fn delete_conversation_index(pool: &SqlitePool, conversation_id: &str) -> Result<()> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT fts_rowid FROM fts_rowid_map WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to look up FTS rowid for deletion")?;
+
+    if let Some((fts_rowid,)) = row {
+        // Delete from the FTS5 table by rowid
+        sqlx::query("DELETE FROM transcription_fts WHERE rowid = ?")
+            .bind(fts_rowid)
+            .execute(pool)
+            .await
+            .context("failed to delete FTS entry")?;
+
+        // Remove the mapping
+        sqlx::query("DELETE FROM fts_rowid_map WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .execute(pool)
+            .await
+            .context("failed to delete FTS rowid mapping")?;
     }
 
     Ok(())
@@ -153,6 +196,18 @@ mod tests {
                 conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            )",
+            "CREATE VIRTUAL TABLE IF NOT EXISTS transcription_fts USING fts5(
+                session_title,
+                conversation_title,
+                full_text,
+                summary_content,
+                content='',
+                contentless_delete=1
+            )",
+            "CREATE TABLE IF NOT EXISTS fts_rowid_map (
+                conversation_id TEXT PRIMARY KEY,
+                fts_rowid INTEGER NOT NULL
             )",
         ] {
             sqlx::query(sql).execute(&pool).await.unwrap();
@@ -269,5 +324,61 @@ mod tests {
 
         let results = search_conversations(&pool, "Morning", 0).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_index_conversation_stores_rowid_mapping() {
+        let pool = setup_pool().await;
+        seed_data(&pool).await;
+
+        index_conversation(&pool, "c1").await.unwrap();
+
+        // Verify the rowid mapping was stored
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT fts_rowid FROM fts_rowid_map WHERE conversation_id = ?")
+                .bind("c1")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert!(row.is_some());
+        assert!(row.unwrap().0 > 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_conversation_index_removes_fts_entry() {
+        let pool = setup_pool().await;
+        seed_data(&pool).await;
+
+        // Index the conversation first
+        index_conversation(&pool, "c1").await.unwrap();
+
+        // Verify it was indexed
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT fts_rowid FROM fts_rowid_map WHERE conversation_id = ?")
+                .bind("c1")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert!(row.is_some());
+
+        // Delete the index entry
+        delete_conversation_index(&pool, "c1").await.unwrap();
+
+        // Verify the mapping was removed
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT fts_rowid FROM fts_rowid_map WHERE conversation_id = ?")
+                .bind("c1")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert!(row.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_conversation_index_nonexistent_is_noop() {
+        let pool = setup_pool().await;
+
+        // Should not error when conversation has no FTS entry
+        delete_conversation_index(&pool, "nonexistent").await.unwrap();
     }
 }

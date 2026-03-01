@@ -33,18 +33,74 @@ pub async fn start_transcription(
     transcription_state: tauri::State<'_, TranscriptionStateHandle>,
     conversation_id: String,
 ) -> Result<Value, String> {
-    // Look up conversation to get audio file path
-    let (audio_file_path, session_id) = {
+    // Look up conversation to get audio file path and validate status
+    let audio_file_path = {
         let db = db.lock().await;
         let row: Option<(String, String)> =
-            sqlx::query_as("SELECT audio_file_path, session_id FROM conversations WHERE id = ?")
+            sqlx::query_as("SELECT audio_file_path, status FROM conversations WHERE id = ?")
                 .bind(&conversation_id)
                 .fetch_optional(db.pool())
                 .await
                 .map_err(|e| format!("database error: {}", e))?;
 
-        row.ok_or_else(|| format!("conversation not found: {}", conversation_id))?
+        let (path, status) =
+            row.ok_or_else(|| format!("conversation not found: {}", conversation_id))?;
+
+        // Only allow transcription from valid states
+        if status != "uploading" && status != "error" {
+            return Err(format!(
+                "cannot start transcription: conversation is in '{}' state (must be 'uploading' or 'error')",
+                status
+            ));
+        }
+
+        path
     };
+
+    // Resolve model directory and check that a model is downloaded
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data dir: {}", e))?;
+    let model_dir = app_data_dir.join("models");
+
+    // Check if any STT model is downloaded
+    {
+        let db_lock = db.lock().await;
+
+        // Check if user has a selected model in settings
+        let selected_model: Option<String> =
+            crate::services::settings::get_setting(db_lock.pool(), "selectedModel")
+                .await
+                .map_err(|e| e.to_string())?;
+
+        let has_model = if let Some(ref model_name) = selected_model {
+            // Check if the specifically selected model is downloaded
+            model_dir.join(model_name).is_dir()
+        } else {
+            // No model selected — check if any whisper model directory exists
+            model_dir.is_dir()
+                && std::fs::read_dir(&model_dir)
+                    .map(|entries| {
+                        entries.filter_map(|e| e.ok()).any(|entry| {
+                            entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
+                                && entry
+                                    .file_name()
+                                    .to_str()
+                                    .map(|n| n.starts_with("whisper-"))
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+        };
+
+        if !has_model {
+            return Err(
+                "ModelNotDownloaded: please download a transcription model in Settings before transcribing"
+                    .to_string(),
+            );
+        }
+    }
 
     // Create cancellation token
     let cancel = Arc::new(AtomicBool::new(false));
@@ -60,13 +116,6 @@ pub async fn start_transcription(
             .await
             .map_err(|e| e.to_string())?;
     }
-
-    // Resolve model directory from app data
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data dir: {}", e))?;
-    let model_dir = app_data_dir.join("models");
 
     // Clone values for the async task
     let conv_id = conversation_id.clone();

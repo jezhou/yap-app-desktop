@@ -65,13 +65,18 @@ pub async fn delete_session(
     session_id: String,
 ) -> Result<Value, String> {
     let db = db.lock().await;
-    let deleted = sessions_service::delete_session(db.pool(), &session_id)
+    let audio_paths = sessions_service::delete_session(db.pool(), &session_id)
         .await
         .map_err(|e| e.to_string())?;
 
-    if !deleted {
-        return Err(format!("session not found: {}", session_id));
+    match audio_paths {
+        Some(paths) => {
+            // Best-effort cleanup of audio files from disk
+            for path in &paths {
+                let _ = std::fs::remove_file(path);
+            }
+            Ok(json!({ "deleted": true }))
+        }
+        None => Err(format!("session not found: {}", session_id)),
     }
-
-    Ok(json!({ "deleted": true }))
 }

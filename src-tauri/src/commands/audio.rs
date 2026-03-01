@@ -36,6 +36,12 @@ pub async fn upload_audio(
         .and_then(|e| e.to_str())
         .unwrap_or("wav");
     let audio_dir = app_data_dir.join("audio");
+
+    // Ensure audio directory exists (defensive against deletion after app startup)
+    tokio::fs::create_dir_all(&audio_dir)
+        .await
+        .map_err(|e| format!("failed to create audio directory: {}", e))?;
+
     let dest_path = audio_dir.join(format!("{}.{}", conversation_id, ext));
 
     // Copy audio file to app data directory (always creates new conversation, even for duplicates)
@@ -47,8 +53,7 @@ pub async fn upload_audio(
     let dest_clone = dest_path.clone();
     let duration = tokio::task::spawn_blocking(move || get_audio_duration(&dest_clone))
         .await
-        .map_err(|e| format!("failed to get duration: {}", e))?
-        .unwrap_or(0.0);
+        .map_err(|e| format!("failed to get duration: {}", e))?;
 
     // Check for duration warning
     let warnings: Vec<String> = audio_validation::check_duration_warning(duration)

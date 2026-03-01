@@ -49,6 +49,7 @@ export default function ExportDialog({
       }
 
       setSuccess(true);
+      setError(null);
     } catch {
       setError("Export failed. Please try again.");
     } finally {

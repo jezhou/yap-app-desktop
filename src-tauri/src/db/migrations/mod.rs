@@ -26,5 +26,9 @@ pub fn all() -> Vec<(&'static str, &'static str)> {
             include_str!("006_create_settings.sql"),
         ),
         ("007_create_fts", include_str!("007_create_fts.sql")),
+        (
+            "008_create_fts_rowid_map",
+            include_str!("008_create_fts_rowid_map.sql"),
+        ),
     ]
 }

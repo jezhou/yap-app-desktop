@@ -206,6 +206,7 @@ pub async fn rename_conversation(
 }
 
 /// Delete a conversation by ID. Cascade handles transcription, summary, speaker_roles.
+/// Also cleans up the FTS index entry for the conversation.
 /// Returns the audio_file_path if the conversation existed (for caller to delete the file).
 pub async fn delete_conversation(
     pool: &SqlitePool,
@@ -223,6 +224,11 @@ pub async fn delete_conversation(
         Some((path,)) => path,
         None => return Ok(None),
     };
+
+    // Clean up FTS index entry before cascade delete removes related data
+    crate::services::search::delete_conversation_index(pool, conversation_id)
+        .await
+        .context("failed to clean up FTS index for conversation")?;
 
     sqlx::query("DELETE FROM conversations WHERE id = ?")
         .bind(conversation_id)
@@ -330,6 +336,18 @@ mod tests {
                 conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                 speaker_label TEXT NOT NULL,
                 display_name TEXT NOT NULL
+            )",
+            "CREATE VIRTUAL TABLE IF NOT EXISTS transcription_fts USING fts5(
+                session_title,
+                conversation_title,
+                full_text,
+                summary_content,
+                content='',
+                contentless_delete=1
+            )",
+            "CREATE TABLE IF NOT EXISTS fts_rowid_map (
+                conversation_id TEXT PRIMARY KEY,
+                fts_rowid INTEGER NOT NULL
             )",
         ] {
             sqlx::query(sql).execute(&pool).await.unwrap();

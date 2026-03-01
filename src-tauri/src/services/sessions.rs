@@ -145,14 +145,37 @@ pub async fn update_session(
 }
 
 /// Delete a session by ID. Cascade deletes conversations and related records.
-pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<bool> {
+/// Also cleans up FTS index entries for all conversations in the session.
+/// Returns the list of audio file paths that were associated with the session's conversations,
+/// so the caller can clean up the files from disk.
+pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<Option<Vec<String>>> {
+    // Collect audio file paths and conversation IDs before cascade delete removes them
+    let conv_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, audio_file_path FROM conversations WHERE session_id = ?")
+            .bind(session_id)
+            .fetch_all(pool)
+            .await
+            .context("failed to fetch conversation data for session deletion")?;
+
+    // Clean up FTS index entries for all conversations in this session
+    for (conv_id, _) in &conv_rows {
+        crate::services::search::delete_conversation_index(pool, conv_id)
+            .await
+            .context("failed to clean up FTS index during session deletion")?;
+    }
+
     let result = sqlx::query("DELETE FROM sessions WHERE id = ?")
         .bind(session_id)
         .execute(pool)
         .await
         .context("failed to delete session")?;
 
-    Ok(result.rows_affected() > 0)
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+
+    let audio_paths: Vec<String> = conv_rows.into_iter().map(|(_, path)| path).collect();
+    Ok(Some(audio_paths))
 }
 
 #[cfg(test)]
@@ -194,6 +217,30 @@ mod tests {
                 status TEXT NOT NULL DEFAULT 'uploading',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS transcription_fts USING fts5(
+                session_title,
+                conversation_title,
+                full_text,
+                summary_content,
+                content='',
+                contentless_delete=1
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS fts_rowid_map (
+                conversation_id TEXT PRIMARY KEY,
+                fts_rowid INTEGER NOT NULL
             )",
         )
         .execute(&pool)
@@ -318,8 +365,9 @@ mod tests {
         let pool = setup_pool().await;
 
         let session = create_session(&pool, "Delete Me", None).await.unwrap();
-        let deleted = delete_session(&pool, &session.id).await.unwrap();
-        assert!(deleted);
+        let result = delete_session(&pool, &session.id).await.unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_empty()); // No conversations, so no audio paths
 
         let found = get_session(&pool, &session.id).await.unwrap();
         assert!(found.is_none());
@@ -329,8 +377,39 @@ mod tests {
     async fn test_delete_nonexistent_session() {
         let pool = setup_pool().await;
 
-        let deleted = delete_session(&pool, "fake-id").await.unwrap();
-        assert!(!deleted);
+        let result = delete_session(&pool, "fake-id").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_returns_audio_paths() {
+        let pool = setup_pool().await;
+
+        let session = create_session(&pool, "With Audio", None).await.unwrap();
+
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO conversations (id, session_id, sequence_number, title, audio_file_path, duration_seconds, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("conv-1")
+        .bind(&session.id)
+        .bind(1)
+        .bind("Convo 1")
+        .bind("/audio/conv-1.wav")
+        .bind(60.0)
+        .bind("completed")
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = delete_session(&pool, &session.id).await.unwrap();
+        assert!(result.is_some());
+        let paths = result.unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], "/audio/conv-1.wav");
     }
 
     #[tokio::test]

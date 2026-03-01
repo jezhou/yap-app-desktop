@@ -98,7 +98,7 @@ export default function SetupWizard() {
 
           <div className="space-y-3">
             {models.map((model) => {
-              const info = MODEL_INFO[model.name] ?? {
+              const info = MODEL_INFO[model.quality_tier] ?? {
                 ram: "",
                 description: "",
               };

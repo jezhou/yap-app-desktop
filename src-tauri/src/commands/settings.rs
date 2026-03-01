@@ -15,16 +15,8 @@ pub async fn get_settings(db: tauri::State<'_, Arc<Mutex<Database>>>) -> Result<
         .await
         .map_err(|e| e.to_string())?;
 
-    // Convert Vec<Setting> into a JSON object { key: value, ... }
-    let mut map = serde_json::Map::new();
-    for setting in settings {
-        // Try to parse as JSON value; fall back to string
-        let val = serde_json::from_str::<Value>(&setting.value)
-            .unwrap_or(Value::String(setting.value));
-        map.insert(setting.key, val);
-    }
-
-    Ok(Value::Object(map))
+    // Return as array of {key, value} objects to match TypeScript Settings[] type
+    Ok(serde_json::to_value(settings).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
@@ -99,10 +91,7 @@ pub async fn list_available_models(app: tauri::AppHandle) -> Result<Value, Strin
 }
 
 #[tauri::command]
-pub async fn download_model(
-    app: tauri::AppHandle,
-    model_name: String,
-) -> Result<Value, String> {
+pub async fn download_model(app: tauri::AppHandle, model_name: String) -> Result<Value, String> {
     // Validate model name
     if !AVAILABLE_MODELS.iter().any(|m| m.name == model_name) {
         return Err(format!("unknown model: {}", model_name));
@@ -148,10 +137,7 @@ pub async fn download_model(
 }
 
 #[tauri::command]
-pub async fn delete_model(
-    app: tauri::AppHandle,
-    model_name: String,
-) -> Result<Value, String> {
+pub async fn delete_model(app: tauri::AppHandle, model_name: String) -> Result<Value, String> {
     if !AVAILABLE_MODELS.iter().any(|m| m.name == model_name) {
         return Err(format!("unknown model: {}", model_name));
     }
@@ -162,8 +148,7 @@ pub async fn delete_model(
         return Err(format!("model not downloaded: {}", model_name));
     }
 
-    std::fs::remove_dir_all(&model_dir)
-        .map_err(|e| format!("failed to delete model: {}", e))?;
+    std::fs::remove_dir_all(&model_dir).map_err(|e| format!("failed to delete model: {}", e))?;
 
     Ok(json!({ "deleted": true }))
 }
