@@ -157,11 +157,9 @@ pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<Optio
             .await
             .context("failed to fetch conversation data for session deletion")?;
 
-    // Clean up FTS index entries for all conversations in this session
+    // Best-effort FTS index cleanup for all conversations in this session
     for (conv_id, _) in &conv_rows {
-        crate::services::search::delete_conversation_index(pool, conv_id)
-            .await
-            .context("failed to clean up FTS index during session deletion")?;
+        let _ = crate::services::search::delete_conversation_index(pool, conv_id).await;
     }
 
     let result = sqlx::query("DELETE FROM sessions WHERE id = ?")

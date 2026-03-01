@@ -225,10 +225,8 @@ pub async fn delete_conversation(
         None => return Ok(None),
     };
 
-    // Clean up FTS index entry before cascade delete removes related data
-    crate::services::search::delete_conversation_index(pool, conversation_id)
-        .await
-        .context("failed to clean up FTS index for conversation")?;
+    // Best-effort FTS index cleanup before cascade delete removes related data
+    let _ = crate::services::search::delete_conversation_index(pool, conversation_id).await;
 
     sqlx::query("DELETE FROM conversations WHERE id = ?")
         .bind(conversation_id)
