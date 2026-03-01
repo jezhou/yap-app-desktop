@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(command git:*)",
+      "Bash(ls:*)",
+      "Bash(bash:*)",
+      "Bash(npx skills:*)",
+      "mcp__figma__get_metadata",
+      "mcp__figma__get_screenshot",
+      "Bash(python3:*)",
+      "WebSearch",
+      "WebFetch(domain:bundlephobia.com)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}
