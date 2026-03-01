@@ -25,6 +25,12 @@ thiserror = "2"
 rodio = "0.20"
 symphonia = { version = "0.5", features = ["mp3", "isomp4", "ogg", "wav", "aac"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries"] }
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
+rubato = "0.16"
+bzip2 = "0.5"
+tar = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
