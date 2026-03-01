@@ -5,6 +5,7 @@ import SessionsPage from "./pages/SessionsPage";
 import SessionDetailPage from "./pages/SessionDetailPage";
 import ConversationDetailPage from "./pages/ConversationDetailPage";
 import SettingsPage from "./pages/SettingsPage";
+import SetupWizard from "./components/settings/SetupWizard";
 
 function AppLayout() {
   return (
@@ -19,7 +20,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/setup" element={<div>Setup Wizard</div>} />
+        <Route path="/setup" element={<SetupWizard />} />
         <Route element={<AppLayout />}>
           <Route path="/" element={<SessionsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
