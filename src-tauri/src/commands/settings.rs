@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 use crate::db::Database;
@@ -56,19 +56,19 @@ struct ModelInfo {
 
 const AVAILABLE_MODELS: &[ModelInfo] = &[
     ModelInfo {
-        name: "whisper-tiny",
-        size: "75 MB",
-        quality_tier: "low",
-    },
-    ModelInfo {
         name: "whisper-base",
         size: "142 MB",
-        quality_tier: "medium",
+        quality_tier: "base",
     },
     ModelInfo {
         name: "whisper-small",
         size: "466 MB",
-        quality_tier: "high",
+        quality_tier: "small",
+    },
+    ModelInfo {
+        name: "whisper-medium",
+        size: "1.5 GB",
+        quality_tier: "medium",
     },
 ];
 
@@ -85,12 +85,12 @@ pub async fn list_available_models(app: tauri::AppHandle) -> Result<Value, Strin
     let models: Vec<Value> = AVAILABLE_MODELS
         .iter()
         .map(|m| {
-            let downloaded = models_path.join(m.name).exists();
+            let downloaded = models_path.join(m.name).is_dir();
             json!({
                 "name": m.name,
                 "size": m.size,
                 "downloaded": downloaded,
-                "qualityTier": m.quality_tier,
+                "quality_tier": m.quality_tier,
             })
         })
         .collect();
@@ -109,17 +109,40 @@ pub async fn download_model(
     }
 
     let model_dir = models_dir(&app).join(&model_name);
+
+    if model_dir.is_dir() {
+        return Err(format!("model already downloaded: {}", model_name));
+    }
+
     std::fs::create_dir_all(&model_dir)
         .map_err(|e| format!("failed to create model directory: {}", e))?;
 
-    // Stub: actual model download via sherpa-rs will emit progress events
-    // For now, create a marker file to indicate the model is "downloaded"
-    let marker = model_dir.join(".downloaded");
-    std::fs::write(&marker, "placeholder")
-        .map_err(|e| format!("failed to write model marker: {}", e))?;
+    // Spawn background task to simulate download with progress events
+    // TODO: Replace with real model download from sherpa-onnx model URLs
+    let app_clone = app.clone();
+    let name = model_name.clone();
+    tokio::spawn(async move {
+        let steps = 10;
+        for i in 1..=steps {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            let percent = (i as f64 / steps as f64) * 100.0;
+            let _ = app_clone.emit(
+                "model-download-progress",
+                json!({
+                    "modelName": name,
+                    "percent": percent,
+                }),
+            );
+        }
+
+        // Write a placeholder marker file to indicate download is "complete"
+        // TODO: Replace with actual model files from sherpa-onnx download
+        let marker = model_dir.join(".downloaded");
+        let _ = std::fs::write(&marker, format!("placeholder for {}", name));
+    });
 
     Ok(json!({
-        "status": "completed",
+        "status": "started",
         "modelName": model_name,
     }))
 }
@@ -129,12 +152,18 @@ pub async fn delete_model(
     app: tauri::AppHandle,
     model_name: String,
 ) -> Result<Value, String> {
+    if !AVAILABLE_MODELS.iter().any(|m| m.name == model_name) {
+        return Err(format!("unknown model: {}", model_name));
+    }
+
     let model_dir = models_dir(&app).join(&model_name);
 
-    if model_dir.exists() {
-        std::fs::remove_dir_all(&model_dir)
-            .map_err(|e| format!("failed to delete model: {}", e))?;
+    if !model_dir.is_dir() {
+        return Err(format!("model not downloaded: {}", model_name));
     }
+
+    std::fs::remove_dir_all(&model_dir)
+        .map_err(|e| format!("failed to delete model: {}", e))?;
 
     Ok(json!({ "deleted": true }))
 }
