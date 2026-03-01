@@ -7,6 +7,7 @@ import { playAudio, pauseAudio, getAudioPosition } from "../services/audio";
 import { onTranscriptionProgress } from "../services/transcription";
 import { getConversationDetail } from "../services/conversations";
 import { updateSpeakerRole } from "../services/conversations";
+import ExportDialog from "../components/export/ExportDialog";
 import type { ConversationDetail, ConversationStatus } from "../types";
 
 type Tab = "transcript" | "insights" | "speakers";
@@ -25,6 +26,7 @@ export default function ConversationDetailPage() {
   const [transcriptionPercent, setTranscriptionPercent] = useState(0);
   const [status, setStatus] = useState<ConversationStatus>("uploading");
   const [error, setError] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!conversationId) return;
@@ -121,11 +123,27 @@ export default function ConversationDetailPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-text">
           {detail.conversation.title}
         </h1>
+        {status === "completed" && (
+          <button
+            onClick={() => setShowExport(true)}
+            className="px-4 py-2 text-sm bg-accent text-bg font-medium rounded-lg hover:bg-accent-hover transition-colors"
+          >
+            Export
+          </button>
+        )}
       </div>
+
+      {showExport && (
+        <ExportDialog
+          conversationId={detail.conversation.id}
+          conversationTitle={detail.conversation.title}
+          onClose={() => setShowExport(false)}
+        />
+      )}
 
       {/* Progress indicator for active processing */}
       {isProcessing && (
