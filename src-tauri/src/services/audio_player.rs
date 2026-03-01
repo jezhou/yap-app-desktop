@@ -52,12 +52,15 @@ impl AudioPlayer {
 
     /// Start or resume playback of an audio file, optionally seeking.
     pub fn play(&self, file_path: &PathBuf, seek_seconds: Option<f64>) -> Result<PlayResult> {
-        let mut inner = self.inner.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
 
         // Initialize output stream if needed
         if inner.stream_handle.is_none() {
-            let (stream, handle) = OutputStream::try_default()
-                .context("failed to open audio output device")?;
+            let (stream, handle) =
+                OutputStream::try_default().context("failed to open audio output device")?;
             inner._stream = Some(stream);
             inner.stream_handle = Some(handle);
         }
@@ -73,16 +76,15 @@ impl AudioPlayer {
         let file = File::open(file_path)
             .with_context(|| format!("audio file not found: {}", file_path.display()))?;
         let reader = BufReader::new(file);
-        let source = Decoder::new(reader)
-            .context("failed to decode audio file")?;
+        let source = Decoder::new(reader).context("failed to decode audio file")?;
 
         // Get duration from the decoder if available
-        let duration = source.total_duration()
+        let duration = source
+            .total_duration()
             .map(|d: std::time::Duration| d.as_secs_f64())
             .unwrap_or(0.0);
 
-        let sink = Sink::try_new(handle)
-            .context("failed to create audio sink")?;
+        let sink = Sink::try_new(handle).context("failed to create audio sink")?;
         sink.append(source);
 
         // Handle seek
@@ -105,7 +107,10 @@ impl AudioPlayer {
 
     /// Pause current playback.
     pub fn pause(&self) -> Result<PauseResult> {
-        let mut inner = self.inner.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
 
         let position = Self::calc_position(&inner);
 
@@ -125,7 +130,10 @@ impl AudioPlayer {
 
     /// Get current playback position.
     pub fn get_position(&self) -> Result<PositionResult> {
-        let inner = self.inner.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
         let position = Self::calc_position(&inner);
 
         // Check if sink finished playing

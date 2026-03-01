@@ -38,11 +38,7 @@ pub async fn create_session(
 }
 
 /// List sessions ordered by most recent, with conversation counts.
-pub async fn list_sessions(
-    pool: &SqlitePool,
-    limit: i64,
-    offset: i64,
-) -> Result<Vec<Session>> {
+pub async fn list_sessions(pool: &SqlitePool, limit: i64, offset: i64) -> Result<Vec<Session>> {
     let rows: Vec<(String, String, Option<String>, String, String, i64)> = sqlx::query_as(
         "SELECT s.id, s.title, s.description, s.created_at, s.updated_at,
                 COUNT(c.id) as conversation_count
@@ -60,14 +56,16 @@ pub async fn list_sessions(
 
     Ok(rows
         .into_iter()
-        .map(|(id, title, description, created_at, updated_at, count)| Session {
-            id,
-            title,
-            description,
-            created_at,
-            updated_at,
-            conversation_count: Some(count),
-        })
+        .map(
+            |(id, title, description, created_at, updated_at, count)| Session {
+                id,
+                title,
+                description,
+                created_at,
+                updated_at,
+                conversation_count: Some(count),
+            },
+        )
         .collect())
 }
 
@@ -82,14 +80,16 @@ pub async fn get_session(pool: &SqlitePool, session_id: &str) -> Result<Option<S
     .await
     .context("failed to fetch session")?;
 
-    Ok(row.map(|(id, title, description, created_at, updated_at)| Session {
-        id,
-        title,
-        description,
-        created_at,
-        updated_at,
-        conversation_count: None,
-    }))
+    Ok(
+        row.map(|(id, title, description, created_at, updated_at)| Session {
+            id,
+            title,
+            description,
+            created_at,
+            updated_at,
+            conversation_count: None,
+        }),
+    )
 }
 
 /// Update a session's title and/or description.

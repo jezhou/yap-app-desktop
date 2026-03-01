@@ -13,13 +13,9 @@ pub async fn search_conversations(
     limit: Option<i64>,
 ) -> Result<Value, String> {
     let db = db.lock().await;
-    let results = search_service::search_conversations(
-        db.pool(),
-        &query,
-        limit.unwrap_or(20),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let results = search_service::search_conversations(db.pool(), &query, limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::to_value(results).map_err(|e| e.to_string())?)
 }

@@ -8,26 +8,42 @@ use crate::models::summary::Summary;
 use crate::models::transcription::{SpeakerRole, Transcription, TranscriptionSegment};
 
 /// List conversations in a session, ordered by sequence number.
-pub async fn list_conversations(
-    pool: &SqlitePool,
-    session_id: &str,
-) -> Result<Vec<Conversation>> {
-    let rows: Vec<(String, String, i64, String, String, f64, String, String, String)> =
-        sqlx::query_as(
-            "SELECT id, session_id, sequence_number, title, audio_file_path,
+pub async fn list_conversations(pool: &SqlitePool, session_id: &str) -> Result<Vec<Conversation>> {
+    let rows: Vec<(
+        String,
+        String,
+        i64,
+        String,
+        String,
+        f64,
+        String,
+        String,
+        String,
+    )> = sqlx::query_as(
+        "SELECT id, session_id, sequence_number, title, audio_file_path,
                     duration_seconds, status, created_at, updated_at
              FROM conversations
              WHERE session_id = ?
              ORDER BY sequence_number ASC",
-        )
-        .bind(session_id)
-        .fetch_all(pool)
-        .await
-        .context("failed to list conversations")?;
+    )
+    .bind(session_id)
+    .fetch_all(pool)
+    .await
+    .context("failed to list conversations")?;
 
     rows.into_iter()
         .map(
-            |(id, session_id, sequence_number, title, audio_file_path, duration_seconds, status, created_at, updated_at)| {
+            |(
+                id,
+                session_id,
+                sequence_number,
+                title,
+                audio_file_path,
+                duration_seconds,
+                status,
+                created_at,
+                updated_at,
+            )| {
                 Ok(Conversation {
                     id,
                     session_id,
@@ -35,7 +51,9 @@ pub async fn list_conversations(
                     title,
                     audio_file_path,
                     duration_seconds,
-                    status: status.parse::<ConversationStatus>().map_err(|e| anyhow::anyhow!(e))?,
+                    status: status
+                        .parse::<ConversationStatus>()
+                        .map_err(|e| anyhow::anyhow!(e))?,
                     created_at,
                     updated_at,
                 })
@@ -58,16 +76,25 @@ pub async fn get_conversation_detail(
     conversation_id: &str,
 ) -> Result<Option<ConversationDetail>> {
     // Fetch conversation
-    let conv_row: Option<(String, String, i64, String, String, f64, String, String, String)> =
-        sqlx::query_as(
-            "SELECT id, session_id, sequence_number, title, audio_file_path,
+    let conv_row: Option<(
+        String,
+        String,
+        i64,
+        String,
+        String,
+        f64,
+        String,
+        String,
+        String,
+    )> = sqlx::query_as(
+        "SELECT id, session_id, sequence_number, title, audio_file_path,
                     duration_seconds, status, created_at, updated_at
              FROM conversations WHERE id = ?",
-        )
-        .bind(conversation_id)
-        .fetch_optional(pool)
-        .await
-        .context("failed to fetch conversation")?;
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .context("failed to fetch conversation")?;
 
     let conv_row = match conv_row {
         Some(r) => r,
@@ -81,7 +108,10 @@ pub async fn get_conversation_detail(
         title: conv_row.3,
         audio_file_path: conv_row.4,
         duration_seconds: conv_row.5,
-        status: conv_row.6.parse::<ConversationStatus>().map_err(|e| anyhow::anyhow!(e))?,
+        status: conv_row
+            .6
+            .parse::<ConversationStatus>()
+            .map_err(|e| anyhow::anyhow!(e))?,
         created_at: conv_row.7,
         updated_at: conv_row.8,
     };
@@ -164,15 +194,13 @@ pub async fn rename_conversation(
 ) -> Result<bool> {
     let now = Utc::now().to_rfc3339();
 
-    let result = sqlx::query(
-        "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
-    )
-    .bind(title)
-    .bind(&now)
-    .bind(conversation_id)
-    .execute(pool)
-    .await
-    .context("failed to rename conversation")?;
+    let result = sqlx::query("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
+        .bind(title)
+        .bind(&now)
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .context("failed to rename conversation")?;
 
     Ok(result.rows_affected() > 0)
 }
@@ -184,13 +212,12 @@ pub async fn delete_conversation(
     conversation_id: &str,
 ) -> Result<Option<String>> {
     // Fetch audio path before deleting
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT audio_file_path FROM conversations WHERE id = ?",
-    )
-    .bind(conversation_id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch conversation for deletion")?;
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT audio_file_path FROM conversations WHERE id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to fetch conversation for deletion")?;
 
     let audio_path = match row {
         Some((path,)) => path,
@@ -313,16 +340,14 @@ mod tests {
 
     async fn insert_session(pool: &SqlitePool, id: &str) {
         let now = Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(id)
-        .bind("Test Session")
-        .bind(&now)
-        .bind(&now)
-        .execute(pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind(id)
+            .bind("Test Session")
+            .bind(&now)
+            .bind(&now)
+            .execute(pool)
+            .await
+            .unwrap();
     }
 
     async fn insert_conversation(pool: &SqlitePool, id: &str, session_id: &str, seq: i64) {
@@ -511,8 +536,13 @@ mod tests {
         sqlx::query(
             "INSERT INTO summaries (id, conversation_id, content, created_at) VALUES (?, ?, ?, ?)",
         )
-        .bind("sum1").bind("c1").bind("summary").bind(&now)
-        .execute(&pool).await.unwrap();
+        .bind("sum1")
+        .bind("c1")
+        .bind("summary")
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         sqlx::query(
             "INSERT INTO speaker_roles (id, conversation_id, speaker_label, display_name) VALUES (?, ?, ?, ?)",
@@ -523,16 +553,28 @@ mod tests {
         delete_conversation(&pool, "c1").await.unwrap();
 
         // Verify cascade
-        let t: Option<(String,)> = sqlx::query_as("SELECT id FROM transcriptions WHERE conversation_id = ?")
-            .bind("c1").fetch_optional(&pool).await.unwrap();
+        let t: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM transcriptions WHERE conversation_id = ?")
+                .bind("c1")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
         assert!(t.is_none());
 
-        let s: Option<(String,)> = sqlx::query_as("SELECT id FROM summaries WHERE conversation_id = ?")
-            .bind("c1").fetch_optional(&pool).await.unwrap();
+        let s: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM summaries WHERE conversation_id = ?")
+                .bind("c1")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
         assert!(s.is_none());
 
-        let sr: Vec<(String,)> = sqlx::query_as("SELECT id FROM speaker_roles WHERE conversation_id = ?")
-            .bind("c1").fetch_all(&pool).await.unwrap();
+        let sr: Vec<(String,)> =
+            sqlx::query_as("SELECT id FROM speaker_roles WHERE conversation_id = ?")
+                .bind("c1")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert!(sr.is_empty());
     }
 
@@ -542,7 +584,9 @@ mod tests {
         insert_session(&pool, "s1").await;
         insert_conversation(&pool, "c1", "s1", 1).await;
 
-        upsert_speaker_role(&pool, "c1", "Speaker 1", "Alice").await.unwrap();
+        upsert_speaker_role(&pool, "c1", "Speaker 1", "Alice")
+            .await
+            .unwrap();
 
         let roles: Vec<(String, String)> = sqlx::query_as(
             "SELECT speaker_label, display_name FROM speaker_roles WHERE conversation_id = ?",
@@ -563,8 +607,12 @@ mod tests {
         insert_session(&pool, "s1").await;
         insert_conversation(&pool, "c1", "s1", 1).await;
 
-        upsert_speaker_role(&pool, "c1", "Speaker 1", "Alice").await.unwrap();
-        upsert_speaker_role(&pool, "c1", "Speaker 1", "Bob").await.unwrap();
+        upsert_speaker_role(&pool, "c1", "Speaker 1", "Alice")
+            .await
+            .unwrap();
+        upsert_speaker_role(&pool, "c1", "Speaker 1", "Bob")
+            .await
+            .unwrap();
 
         let roles: Vec<(String, String)> = sqlx::query_as(
             "SELECT speaker_label, display_name FROM speaker_roles WHERE conversation_id = ?",

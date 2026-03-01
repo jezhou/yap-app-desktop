@@ -7,7 +7,7 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use crate::models::transcription::{TranscriptionSegment, Transcription};
+use crate::models::transcription::{Transcription, TranscriptionSegment};
 
 /// Progress callback type: receives a percentage (0.0 to 100.0).
 pub type ProgressCallback = Box<dyn Fn(f64) + Send + 'static>;
@@ -118,19 +118,24 @@ fn transcribe_sync(
     }
 
     // Placeholder result — will be replaced by real sherpa-rs output
-    let segments = vec![
-        TranscriptionSegment {
-            speaker: "Speaker 1".to_string(),
-            text: "Transcription will appear here once a model is downloaded.".to_string(),
-            start_time: 0.0,
-            end_time: 5.0,
-            confidence: 0.0,
-        },
-    ];
+    let segments = vec![TranscriptionSegment {
+        speaker: "Speaker 1".to_string(),
+        text: "Transcription will appear here once a model is downloaded.".to_string(),
+        start_time: 0.0,
+        end_time: 5.0,
+        confidence: 0.0,
+    }];
 
-    let full_text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+    let full_text = segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
 
-    Ok(TranscriptionResult { segments, full_text })
+    Ok(TranscriptionResult {
+        segments,
+        full_text,
+    })
 }
 
 /// Save a transcription result to the database.
@@ -141,8 +146,8 @@ pub async fn save_transcription(
 ) -> Result<Transcription> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let segments_json = serde_json::to_string(&result.segments)
-        .context("failed to serialize segments")?;
+    let segments_json =
+        serde_json::to_string(&result.segments).context("failed to serialize segments")?;
 
     sqlx::query(
         "INSERT INTO transcriptions (id, conversation_id, full_text, segments, created_at)
@@ -203,7 +208,10 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("audio file not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("audio file not found"));
     }
 
     #[tokio::test]
@@ -213,13 +221,7 @@ mod tests {
         // Create a temp file so the file exists
         let tmp = NamedTempFile::new().unwrap();
 
-        let result = transcribe_audio(
-            tmp.path(),
-            Path::new("/models"),
-            cancel,
-            None,
-        )
-        .await;
+        let result = transcribe_audio(tmp.path(), Path::new("/models"), cancel, None).await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cancelled"));
@@ -254,14 +256,9 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let tmp = NamedTempFile::new().unwrap();
 
-        let result = transcribe_audio(
-            tmp.path(),
-            Path::new("/models"),
-            cancel,
-            None,
-        )
-        .await
-        .unwrap();
+        let result = transcribe_audio(tmp.path(), Path::new("/models"), cancel, None)
+            .await
+            .unwrap();
 
         assert!(!result.segments.is_empty());
         assert!(!result.full_text.is_empty());
@@ -274,7 +271,10 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         for sql in &[
             "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
@@ -285,8 +285,14 @@ mod tests {
         }
 
         let now = Utc::now().to_rfc3339();
-        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1', 'Test', ?, ?)")
-            .bind(&now).bind(&now).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1', 'Test', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO conversations (id, session_id, sequence_number, title, audio_file_path, duration_seconds, status, created_at, updated_at) VALUES ('c1', 's1', 1, 'Conv', '/audio/test.wav', 60.0, 'analyzing', ?, ?)")
             .bind(&now).bind(&now).execute(&pool).await.unwrap();
 
@@ -322,15 +328,26 @@ mod tests {
         }
 
         let now = Utc::now().to_rfc3339();
-        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1', 'Test', ?, ?)")
-            .bind(&now).bind(&now).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1', 'Test', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO conversations (id, session_id, sequence_number, title, audio_file_path, duration_seconds, status, created_at, updated_at) VALUES ('c1', 's1', 1, 'Conv', '/audio/test.wav', 60.0, 'uploading', ?, ?)")
             .bind(&now).bind(&now).execute(&pool).await.unwrap();
 
-        update_conversation_status(&pool, "c1", "analyzing").await.unwrap();
+        update_conversation_status(&pool, "c1", "analyzing")
+            .await
+            .unwrap();
 
-        let (status,): (String,) = sqlx::query_as("SELECT status FROM conversations WHERE id = 'c1'")
-            .fetch_one(&pool).await.unwrap();
+        let (status,): (String,) =
+            sqlx::query_as("SELECT status FROM conversations WHERE id = 'c1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(status, "analyzing");
     }
 }

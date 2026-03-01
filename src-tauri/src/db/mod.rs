@@ -15,8 +15,7 @@ pub struct Database {
 impl Database {
     /// Initialize the database: create the file if needed, run migrations.
     pub async fn init(app_data_dir: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&app_data_dir)
-            .context("failed to create app data directory")?;
+        std::fs::create_dir_all(&app_data_dir).context("failed to create app data directory")?;
 
         let db_path = app_data_dir.join("yap.db");
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
@@ -60,13 +59,12 @@ impl Database {
         .context("failed to create migrations table")?;
 
         for (name, sql) in migrations::all() {
-            let already_applied: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM _migrations WHERE name = ?)",
-            )
-            .bind(name)
-            .fetch_one(&self.pool)
-            .await
-            .context("failed to check migration status")?;
+            let already_applied: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _migrations WHERE name = ?)")
+                    .bind(name)
+                    .fetch_one(&self.pool)
+                    .await
+                    .context("failed to check migration status")?;
 
             if !already_applied {
                 // Execute migration SQL (may contain multiple statements)
@@ -86,9 +84,7 @@ impl Database {
                     .bind(name)
                     .execute(&self.pool)
                     .await
-                    .with_context(|| {
-                        format!("failed to record migration '{}'", name)
-                    })?;
+                    .with_context(|| format!("failed to record migration '{}'", name))?;
             }
         }
 
@@ -120,19 +116,30 @@ mod tests {
         let db = Database::init(tmp.path().to_path_buf()).await.unwrap();
 
         // Verify tables exist by querying sqlite_master
-        let tables: Vec<(String,)> = sqlx::query_as(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-        )
-        .fetch_all(db.pool())
-        .await
-        .unwrap();
+        let tables: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(db.pool())
+                .await
+                .unwrap();
 
         let table_names: Vec<&str> = tables.iter().map(|t| t.0.as_str()).collect();
         assert!(table_names.contains(&"sessions"), "sessions table missing");
-        assert!(table_names.contains(&"conversations"), "conversations table missing");
-        assert!(table_names.contains(&"transcriptions"), "transcriptions table missing");
-        assert!(table_names.contains(&"summaries"), "summaries table missing");
-        assert!(table_names.contains(&"speaker_roles"), "speaker_roles table missing");
+        assert!(
+            table_names.contains(&"conversations"),
+            "conversations table missing"
+        );
+        assert!(
+            table_names.contains(&"transcriptions"),
+            "transcriptions table missing"
+        );
+        assert!(
+            table_names.contains(&"summaries"),
+            "summaries table missing"
+        );
+        assert!(
+            table_names.contains(&"speaker_roles"),
+            "speaker_roles table missing"
+        );
         assert!(table_names.contains(&"settings"), "settings table missing");
     }
 

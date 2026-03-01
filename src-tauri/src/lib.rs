@@ -19,11 +19,9 @@ pub fn run() {
 
             // Ensure the audio files directory exists
             let audio_dir = app_data_dir.join("audio");
-            std::fs::create_dir_all(&audio_dir)
-                .expect("failed to create audio directory");
+            std::fs::create_dir_all(&audio_dir).expect("failed to create audio directory");
 
-            let rt = tokio::runtime::Runtime::new()
-                .expect("failed to create tokio runtime");
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             let database = rt
                 .block_on(db::Database::init(app_data_dir))
                 .expect("failed to initialize database");

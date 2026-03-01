@@ -26,6 +26,9 @@ rodio = "0.20"
 symphonia = { version = "0.5", features = ["mp3", "isomp4", "ogg", "wav", "aac"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 

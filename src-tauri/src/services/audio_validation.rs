@@ -109,8 +109,8 @@ fn fs_available_space(path: &Path) -> Option<u64> {
 
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
         use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
 
         let wide: Vec<u16> = OsStr::new(check_path.to_str()?)
             .encode_wide()

@@ -36,13 +36,12 @@ pub async fn start_transcription(
     // Look up conversation to get audio file path
     let (audio_file_path, session_id) = {
         let db = db.lock().await;
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT audio_file_path, session_id FROM conversations WHERE id = ?",
-        )
-        .bind(&conversation_id)
-        .fetch_optional(db.pool())
-        .await
-        .map_err(|e| format!("database error: {}", e))?;
+        let row: Option<(String, String)> =
+            sqlx::query_as("SELECT audio_file_path, session_id FROM conversations WHERE id = ?")
+                .bind(&conversation_id)
+                .fetch_optional(db.pool())
+                .await
+                .map_err(|e| format!("database error: {}", e))?;
 
         row.ok_or_else(|| format!("conversation not found: {}", conversation_id))?
     };
@@ -97,12 +96,8 @@ pub async fn start_transcription(
         if let Err(e) = result {
             eprintln!("transcription failed for {}: {}", conv_id, e);
             let db = db_state.lock().await;
-            let _ = transcription_service::update_conversation_status(
-                db.pool(),
-                &conv_id,
-                "error",
-            )
-            .await;
+            let _ = transcription_service::update_conversation_status(db.pool(), &conv_id, "error")
+                .await;
         }
     });
 
@@ -148,6 +143,19 @@ async fn run_transcription_pipeline(
         transcription_service::save_transcription(db.pool(), conversation_id, &result)
             .await
             .map_err(|e| e.to_string())?;
+    }
+
+    // Check for "no speech detected" condition
+    let no_speech = result.segments.is_empty()
+        || (result.segments.len() == 1 && result.segments[0].confidence == 0.0);
+    if no_speech {
+        let _ = app.emit(
+            "transcription-no-speech",
+            json!({
+                "conversationId": conversation_id,
+                "message": "No speech was detected in this recording."
+            }),
+        );
     }
 
     // Generate and save summary

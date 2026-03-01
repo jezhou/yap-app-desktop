@@ -75,10 +75,7 @@ pub async fn search_conversations(
 }
 
 /// Populate the FTS index for a conversation. Called after transcription completes.
-pub async fn index_conversation(
-    pool: &SqlitePool,
-    conversation_id: &str,
-) -> Result<()> {
+pub async fn index_conversation(pool: &SqlitePool, conversation_id: &str) -> Result<()> {
     let row: Option<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT s.title, c.title, t.full_text, sm.content
          FROM conversations c
@@ -196,10 +193,13 @@ mod tests {
         sqlx::query(
             "INSERT INTO summaries (id, conversation_id, content, created_at) VALUES (?, ?, ?, ?)",
         )
-        .bind("sum1").bind("c1")
+        .bind("sum1")
+        .bind("c1")
         .bind("Discussion about quarterly results and future roadmap.")
         .bind(&now)
-        .execute(pool).await.unwrap();
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -236,7 +236,9 @@ mod tests {
         let pool = setup_pool().await;
         seed_data(&pool).await;
 
-        let results = search_conversations(&pool, "Team Meeting", 10).await.unwrap();
+        let results = search_conversations(&pool, "Team Meeting", 10)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -245,7 +247,9 @@ mod tests {
         let pool = setup_pool().await;
         seed_data(&pool).await;
 
-        let results = search_conversations(&pool, "nonexistent", 10).await.unwrap();
+        let results = search_conversations(&pool, "nonexistent", 10)
+            .await
+            .unwrap();
         assert!(results.is_empty());
     }
 

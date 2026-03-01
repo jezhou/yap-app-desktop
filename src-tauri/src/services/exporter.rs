@@ -23,35 +23,31 @@ pub struct ExportSegment {
 /// Gather all data needed to export a conversation.
 pub async fn gather_export_data(pool: &SqlitePool, conversation_id: &str) -> Result<ExportData> {
     // Fetch conversation
-    let conv: Option<(String, String)> = sqlx::query_as(
-        "SELECT title, created_at FROM conversations WHERE id = ?",
-    )
-    .bind(conversation_id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch conversation")?;
+    let conv: Option<(String, String)> =
+        sqlx::query_as("SELECT title, created_at FROM conversations WHERE id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to fetch conversation")?;
 
-    let (title, created_at) = conv.ok_or_else(|| {
-        anyhow::anyhow!("conversation not found: {}", conversation_id)
-    })?;
+    let (title, created_at) =
+        conv.ok_or_else(|| anyhow::anyhow!("conversation not found: {}", conversation_id))?;
 
     // Fetch summary
-    let summary: Option<(String,)> = sqlx::query_as(
-        "SELECT content FROM summaries WHERE conversation_id = ?",
-    )
-    .bind(conversation_id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch summary")?;
+    let summary: Option<(String,)> =
+        sqlx::query_as("SELECT content FROM summaries WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to fetch summary")?;
 
     // Fetch transcription segments JSON
-    let transcription: Option<(String,)> = sqlx::query_as(
-        "SELECT segments FROM transcriptions WHERE conversation_id = ?",
-    )
-    .bind(conversation_id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch transcription")?;
+    let transcription: Option<(String,)> =
+        sqlx::query_as("SELECT segments FROM transcriptions WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to fetch transcription")?;
 
     // Fetch speaker roles
     let roles: Vec<(String, String)> = sqlx::query_as(
@@ -127,10 +123,7 @@ pub fn format_markdown(data: &ExportData) -> String {
         md.push_str("## Transcript\n\n");
 
         for segment in &data.segments {
-            let speaker = segment
-                .display_name
-                .as_deref()
-                .unwrap_or(&segment.speaker);
+            let speaker = segment.display_name.as_deref().unwrap_or(&segment.speaker);
             let timestamp = format_timestamp(segment.start_time);
             md.push_str(&format!(
                 "**[{}] {}**: {}\n\n",
@@ -157,10 +150,7 @@ pub async fn export_to_markdown(
 }
 
 /// Gather export data as a structured JSON payload for frontend pdfmake rendering.
-pub async fn export_to_pdf_payload(
-    pool: &SqlitePool,
-    conversation_id: &str,
-) -> Result<ExportData> {
+pub async fn export_to_pdf_payload(pool: &SqlitePool, conversation_id: &str) -> Result<ExportData> {
     gather_export_data(pool, conversation_id).await
 }
 

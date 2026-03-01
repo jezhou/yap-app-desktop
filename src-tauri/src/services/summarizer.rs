@@ -17,7 +17,11 @@ pub fn generate_summary(segments: &[TranscriptionSegment]) -> String {
         return "No speech detected in this recording.".to_string();
     }
 
-    let full_text: String = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+    let full_text: String = segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
 
     // Split into sentences
     let sentences: Vec<&str> = full_text
@@ -27,8 +31,10 @@ pub fn generate_summary(segments: &[TranscriptionSegment]) -> String {
         .collect();
 
     if sentences.is_empty() {
-        return format!("Recording contains speech from {} speaker(s).",
-            count_speakers(segments));
+        return format!(
+            "Recording contains speech from {} speaker(s).",
+            count_speakers(segments)
+        );
     }
 
     // Build summary parts
@@ -51,11 +57,8 @@ pub fn generate_summary(segments: &[TranscriptionSegment]) -> String {
     // Part 2: Key points as bullet list
     // Extract up to 5 representative sentences, favoring longer ones
     // that are more likely to contain meaningful content
-    let mut scored_sentences: Vec<(usize, &str)> = sentences
-        .iter()
-        .enumerate()
-        .map(|(i, &s)| (i, s))
-        .collect();
+    let mut scored_sentences: Vec<(usize, &str)> =
+        sentences.iter().enumerate().map(|(i, &s)| (i, s)).collect();
 
     // Score by word count (longer sentences tend to be more informative)
     scored_sentences.sort_by(|a, b| {
@@ -64,11 +67,7 @@ pub fn generate_summary(segments: &[TranscriptionSegment]) -> String {
         b_words.cmp(&a_words)
     });
 
-    let key_points: Vec<&str> = scored_sentences
-        .iter()
-        .take(5)
-        .map(|(_, s)| *s)
-        .collect();
+    let key_points: Vec<&str> = scored_sentences.iter().take(5).map(|(_, s)| *s).collect();
 
     if !key_points.is_empty() {
         parts.push("\nKey points:".to_string());
@@ -143,7 +142,11 @@ pub async fn save_summary(
 mod tests {
     use super::*;
 
-    fn make_segments(speakers: &[&str], texts: &[&str], durations: &[(f64, f64)]) -> Vec<TranscriptionSegment> {
+    fn make_segments(
+        speakers: &[&str],
+        texts: &[&str],
+        durations: &[(f64, f64)],
+    ) -> Vec<TranscriptionSegment> {
         speakers
             .iter()
             .zip(texts.iter())
@@ -168,7 +171,10 @@ mod tests {
     fn test_generate_summary_single_speaker() {
         let segments = make_segments(
             &["Speaker 1", "Speaker 1"],
-            &["Hello, how are you doing today.", "I'm working on a project."],
+            &[
+                "Hello, how are you doing today.",
+                "I'm working on a project.",
+            ],
             &[(0.0, 3.0), (3.0, 6.0)],
         );
 
@@ -231,7 +237,10 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         for sql in &[
             "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
@@ -242,12 +251,20 @@ mod tests {
         }
 
         let now = Utc::now().to_rfc3339();
-        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1', 'Test', ?, ?)")
-            .bind(&now).bind(&now).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s1', 'Test', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO conversations (id, session_id, sequence_number, title, audio_file_path, duration_seconds, status, created_at, updated_at) VALUES ('c1', 's1', 1, 'Conv', '/audio/test.wav', 60.0, 'analyzing', ?, ?)")
             .bind(&now).bind(&now).execute(&pool).await.unwrap();
 
-        let summary = save_summary(&pool, "c1", "Test summary content").await.unwrap();
+        let summary = save_summary(&pool, "c1", "Test summary content")
+            .await
+            .unwrap();
         assert_eq!(summary.conversation_id, "c1");
         assert_eq!(summary.content, "Test summary content");
     }

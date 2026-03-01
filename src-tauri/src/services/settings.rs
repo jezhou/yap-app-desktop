@@ -24,12 +24,11 @@ pub async fn get_all_settings(pool: &SqlitePool) -> Result<Vec<Setting>> {
 
 /// Retrieve a single setting by key.
 pub async fn get_setting(pool: &SqlitePool, key: &str) -> Result<Option<String>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = ?")
-            .bind(key)
-            .fetch_optional(pool)
-            .await
-            .context("failed to fetch setting")?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .context("failed to fetch setting")?;
 
     Ok(row.map(|(value,)| value))
 }
