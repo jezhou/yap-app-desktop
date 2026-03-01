@@ -130,6 +130,8 @@ The orchestrating agent acts as **Maya (PM)** — creating tasks from `tasks.md`
 
 Work completed by these agents should regularly be commited, with agent attribution, and pushed to the remote repository.
 
+If there are bugs caught by QA or the designer, or some aspect of the spec is not enforced for some reason via the architect's findings, then dev should go back and rework the issues so that the bugs are fixed.
+
 ### Pipeline
 
 Every task flows: **Developer → Architect review → QA tests → Designer review (if UI)**. No task is complete until all applicable reviewers sign off. Developers work in parallel lanes (backend/frontend). Phase gates block advancement until checkpoints pass.
