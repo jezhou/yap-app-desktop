@@ -159,7 +159,7 @@ pub async fn list_available_models(app: tauri::AppHandle) -> Result<Value, Strin
 }
 
 /// Stream-download a single file from a URL to a local path with progress reporting.
-/// Writes to a `.tmp` file first, then renames for atomicity.
+/// Writes to a `.downloading` temp file first, then renames for atomicity.
 /// Skips if the file already exists (resume support).
 async fn download_file(
     client: &reqwest::Client,
@@ -172,7 +172,11 @@ async fn download_file(
         return Ok(());
     }
 
-    let tmp_path = dest.with_extension("tmp");
+    // Append .downloading suffix (not replace extension) to avoid issues
+    // with filenames like "encoder.int8.onnx" where with_extension replaces ".onnx"
+    let mut tmp_name = dest.as_os_str().to_os_string();
+    tmp_name.push(".downloading");
+    let tmp_path = std::path::PathBuf::from(tmp_name);
 
     let response = client
         .get(url)
@@ -207,12 +211,16 @@ async fn download_file(
         on_progress(downloaded, total_size);
     }
 
-    file.flush()
+    // sync_all ensures data + metadata are flushed to disk before rename.
+    // shutdown() fully closes the async file handle (unlike drop which is async).
+    file.sync_all()
         .await
-        .map_err(|e| format!("failed to flush file: {}", e))?;
-    drop(file);
+        .map_err(|e| format!("failed to sync file: {}", e))?;
+    file.shutdown()
+        .await
+        .map_err(|e| format!("failed to close file: {}", e))?;
 
-    // Atomic rename
+    // Rename temp to final destination
     tokio::fs::rename(&tmp_path, dest)
         .await
         .map_err(|e| format!("failed to rename temp file: {}", e))?;
