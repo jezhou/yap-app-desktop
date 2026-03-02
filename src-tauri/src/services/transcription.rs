@@ -568,6 +568,8 @@ fn transcribe_sync(
         anyhow::bail!("audio file not found: {}", audio_path.display());
     }
 
+    eprintln!("[transcription] audio file: {}", audio_path.display());
+
     // Report initial progress
     if let Some(ref cb) = on_progress {
         cb(0.0);
@@ -575,16 +577,24 @@ fn transcribe_sync(
 
     // Find a whisper model — fall back to stub if none available
     let whisper_dir = match find_whisper_model(model_dir) {
-        Some(dir) => dir,
-        None => return transcribe_stub(&on_progress, &cancel),
+        Some(dir) => {
+            eprintln!("[transcription] using model: {}", dir.display());
+            dir
+        }
+        None => {
+            eprintln!("[transcription] no whisper model found, using stub");
+            return transcribe_stub(&on_progress, &cancel);
+        }
     };
 
     // Phase 1: Load audio (0-20%)
+    eprintln!("[transcription] phase 1: loading audio...");
     if let Some(ref cb) = on_progress {
         cb(5.0);
     }
 
     let samples = load_audio_samples(audio_path)?;
+    eprintln!("[transcription] audio loaded: {} samples ({:.1}s at 16kHz)", samples.len(), samples.len() as f64 / TARGET_SAMPLE_RATE as f64);
 
     if cancel.load(Ordering::Relaxed) {
         anyhow::bail!("transcription cancelled");
@@ -594,7 +604,10 @@ fn transcribe_sync(
     }
 
     // Phase 2: Whisper STT (20-70%)
+    eprintln!("[transcription] phase 2: running whisper STT (this may take a while)...");
+    let stt_start = std::time::Instant::now();
     let stt_result = run_whisper_stt(&samples, &whisper_dir, &cancel)?;
+    eprintln!("[transcription] whisper STT completed in {:.1}s, {} tokens", stt_start.elapsed().as_secs_f64(), stt_result.tokens.len());
 
     if cancel.load(Ordering::Relaxed) {
         anyhow::bail!("transcription cancelled");
@@ -604,7 +617,10 @@ fn transcribe_sync(
     }
 
     // Phase 3: Diarization (70-90%)
+    eprintln!("[transcription] phase 3: running diarization...");
+    let diar_start = std::time::Instant::now();
     let diar_segments = run_diarization(samples, model_dir, &cancel);
+    eprintln!("[transcription] diarization completed in {:.1}s, {} segments", diar_start.elapsed().as_secs_f64(), diar_segments.as_ref().map(|s| s.len()).unwrap_or(0));
 
     if cancel.load(Ordering::Relaxed) {
         anyhow::bail!("transcription cancelled");
@@ -614,6 +630,7 @@ fn transcribe_sync(
     }
 
     // Phase 4: Merge (90-100%)
+    eprintln!("[transcription] phase 4: merging results...");
     let segments = merge_stt_and_diarization(&stt_result, diar_segments.as_deref());
 
     // Build full text
@@ -622,6 +639,8 @@ fn transcribe_sync(
         .map(|s| s.text.as_str())
         .collect::<Vec<_>>()
         .join(" ");
+
+    eprintln!("[transcription] done: {} segments, {} chars of text", segments.len(), full_text.len());
 
     if let Some(ref cb) = on_progress {
         cb(100.0);

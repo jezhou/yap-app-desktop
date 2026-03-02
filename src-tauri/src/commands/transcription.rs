@@ -123,6 +123,8 @@ pub async fn start_transcription(
     let ts_state = transcription_state.inner().clone();
     let app_handle = app.clone();
 
+    eprintln!("[transcription] starting pipeline for conversation {}", conversation_id);
+
     // Spawn the transcription pipeline as a background task
     tokio::spawn(async move {
         let result = run_transcription_pipeline(
@@ -141,12 +143,14 @@ pub async fn start_transcription(
             active.remove(&conv_id);
         }
 
-        // Handle errors by setting status to "error"
-        if let Err(e) = result {
-            eprintln!("transcription failed for {}: {}", conv_id, e);
-            let db = db_state.lock().await;
-            let _ = transcription_service::update_conversation_status(db.pool(), &conv_id, "error")
-                .await;
+        match &result {
+            Ok(()) => eprintln!("[transcription] pipeline completed for {}", conv_id),
+            Err(e) => {
+                eprintln!("[transcription] pipeline FAILED for {}: {}", conv_id, e);
+                let db = db_state.lock().await;
+                let _ = transcription_service::update_conversation_status(db.pool(), &conv_id, "error")
+                    .await;
+            }
         }
     });
 
