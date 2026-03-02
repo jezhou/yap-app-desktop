@@ -8,14 +8,12 @@ import {
   deleteConversation,
 } from "../services/conversations";
 import { startTranscription } from "../services/transcription";
-import { onModelDownloadProgress } from "../services/settings";
 import type { Conversation } from "../types";
 
 export default function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
 
   const loadConversations = useCallback(async () => {
     if (!sessionId) return;
@@ -30,20 +28,6 @@ export default function SessionDetailPage() {
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
-
-  // Listen for background model download progress
-  useEffect(() => {
-    const unlisten = onModelDownloadProgress((event) => {
-      if (event.percent >= 100) {
-        setDownloadPercent(null);
-      } else {
-        setDownloadPercent(event.percent);
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
 
   async function handleRename(conversationId: string, title: string) {
     try {
@@ -70,20 +54,6 @@ export default function SessionDetailPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-text">Session</h1>
-
-      {downloadPercent !== null && (
-        <div className="bg-accent/10 border border-accent/30 rounded-lg px-4 py-3">
-          <p className="text-sm text-accent font-medium">
-            Downloading transcription model... {downloadPercent}%
-          </p>
-          <div className="mt-2 h-1.5 bg-surface-hover rounded-full overflow-hidden">
-            <div
-              className="h-full bg-accent rounded-full transition-all duration-300"
-              style={{ width: `${downloadPercent}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {error && (
         <p className="text-sm text-error bg-error/10 rounded-lg px-4 py-2">

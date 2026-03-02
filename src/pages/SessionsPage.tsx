@@ -6,6 +6,7 @@ import {
   updateSession,
   deleteSession,
 } from "../services/sessions";
+import { onModelDownloadProgress } from "../services/settings";
 import type { Session } from "../types";
 
 export default function SessionsPage() {
@@ -13,6 +14,7 @@ export default function SessionsPage() {
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -26,6 +28,20 @@ export default function SessionsPage() {
   useEffect(() => {
     loadSessions();
   }, [loadSessions]);
+
+  // Listen for background model download progress
+  useEffect(() => {
+    const unlisten = onModelDownloadProgress((event) => {
+      if (event.percent >= 100) {
+        setDownloadPercent(null);
+      } else {
+        setDownloadPercent(event.percent);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   async function handleCreate() {
     const trimmed = newTitle.trim();
@@ -72,6 +88,20 @@ export default function SessionsPage() {
           </button>
         )}
       </div>
+
+      {downloadPercent !== null && (
+        <div className="bg-accent/10 border border-accent/30 rounded-lg px-4 py-3">
+          <p className="text-sm text-accent font-medium">
+            Downloading transcription model... {downloadPercent}%
+          </p>
+          <div className="mt-2 h-1.5 bg-surface-hover rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-300"
+              style={{ width: `${downloadPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {error && (
         <p className="text-sm text-error bg-error/10 rounded-lg px-4 py-2">
