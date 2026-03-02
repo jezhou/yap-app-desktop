@@ -325,6 +325,7 @@ async fn download_embedding_model(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app
                 .path()

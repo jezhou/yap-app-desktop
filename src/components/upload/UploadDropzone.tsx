@@ -1,5 +1,6 @@
-import { useState, useCallback, type DragEvent } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { uploadAudio } from "../../services/audio";
 import type { UploadAudioOutput } from "../../types";
 
@@ -42,6 +43,27 @@ export default function UploadDropzone({
     [sessionId, onUploadStart, onError],
   );
 
+  // Listen for Tauri native drag-drop events (provides full file paths)
+  useEffect(() => {
+    const appWindow = getCurrentWebviewWindow();
+    const unlisten = appWindow.onDragDropEvent((event) => {
+      if (event.payload.type === "over") {
+        setIsDragging(true);
+      } else if (event.payload.type === "leave") {
+        setIsDragging(false);
+      } else if (event.payload.type === "drop") {
+        setIsDragging(false);
+        const paths = event.payload.paths;
+        if (paths.length > 0) {
+          handleFile(paths[0]);
+        }
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [handleFile]);
+
   async function handleBrowse() {
     const selected = await open({
       multiple: false,
@@ -58,36 +80,8 @@ export default function UploadDropzone({
     }
   }
 
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      // In Tauri, dropped files provide the path via the file name
-      handleFile(file.name);
-    }
-  }
-
   return (
     <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       className={`flex flex-col items-center justify-center p-8 rounded-lg border-2 border-dashed transition-colors cursor-pointer ${
         isDragging
           ? "border-accent bg-accent/5"
