@@ -1,0 +1,105 @@
+
+ ▐▛███▜▌   Claude Code v2.1.63
+▝▜█████▛▘  Opus 4.6 · Claude Max
+  ▘▘ ▝▝    ~/Git/yap-app-desktop
+
+❯ How are voice recordings and transcriptions saved?  
+
+⏺ Let me look at the relevant code to give you a clear answer.
+
+⏺ Explore(Explore audio/transcription storage)
+  ⎿  Done (27 tool uses · 54.5k tokens · 47s)
+  (ctrl+o to expand)
+
+⏺ Here's how Yap stores voice recordings and transcriptions:
+
+  Audio Files (Filesystem)
+
+  Audio files are copied to {APP_DATA_DIR}/audio/{conversation_id}.{ext} (e.g.,
+  ~/Library/Application Support/com.jzc-labs.yap/audio/abc-123.mp3 on macOS).
+  The original extension is preserved. Copying ensures the user can safely
+  delete the original without losing data.
+
+  Transcriptions (SQLite)
+
+  Everything else lives in a single SQLite database (yap.db) with WAL mode. The
+  key tables:
+
+  - conversations — metadata (title, audio path, duration, status)
+  - transcriptions — full text + a JSON array of segments (speaker, text,
+  start/end time, confidence) in a 1:1 relationship with conversations
+  - speaker_roles — user-assigned display names for diarized speakers
+  - summaries — auto-generated key points
+  - FTS5 virtual table — indexes across transcriptions, sessions, and summaries
+  for search
+
+  Data Flow
+
+  Upload: file selected → validate → copy to audio dir → INSERT conversation
+  (status=uploading)
+                                                           ↓
+  Transcribe: start_transcription → status=analyzing → background task:
+    1. sherpa-rs Whisper ONNX (STT) + pyannote/3dspeaker (diarization)
+    2. INSERT transcription (full_text + JSON segments)
+    3. INSERT summary (auto-generated)
+    4. INSERT into FTS5 index
+    5. UPDATE conversation status=completed
+    6. Emit progress events throughout
+
+  Deletion
+
+  Deleting a conversation cascades to transcriptions, summaries, speaker_roles,
+  and FTS entries via foreign keys. The audio file is removed from disk with
+  best-effort cleanup.
+
+  Everything is fully local — no cloud, no API keys.
+
+✻ Worked for 1m 9s
+
+❯ Why is speaker diarization not supported? I thought the model we used in  
+  the spec supported everything?                                            
+  ⎿  [Image #1]
+
+⏺ Let me investigate why the diarization models show "Not available".
+
+⏺ Explore(Investigate diarization model availability)
+  ⎿  Done (27 tool uses · 48.1k tokens · 45s)
+  (ctrl+o to expand)
+
+⏺ The diarization models aren't broken — they were never bundled or made 
+  downloadable. Here's the gap:
+
+  What the spec says
+
+  The spec (specs/001-voice-transcription/research.md) says the diarization
+  models should be "bundled by default" with the app:
+  - sherpa-onnx-pyannote-segmentation-3-0 (~5-10 MB)
+  - 3dspeaker_speech_eres2net_base (~15 MB)
+
+  What's actually implemented
+
+  The backend (src-tauri/src/commands/settings.rs:156-168) just checks if the
+  model directories exist:
+
+  let segmentation_ready = models_path.join("pyannote-segmentation").exists();
+  let embedding_ready = models_path.join("3dspeaker-embedding").exists();
+
+  But nothing ever puts files there — no bundling during build, no download
+  mechanism. The AVAILABLE_MODELS constant and download logic only cover Whisper
+   STT models. The frontend (src/pages/SettingsPage.tsx:153-188) renders the
+  status as read-only text with no download button.
+
+  So the directories don't exist → status is false → UI shows "Not available".
+
+  Two paths to fix this
+
+  1. Bundle the models with the app (matches spec intent) — include the ONNX
+  files in the Tauri resource bundle and copy them to the models directory on
+  first launch. They're small (~20 MB total) so this is reasonable.
+  2. Make them downloadable (like Whisper models) — add download URLs, extend
+  the model management commands, and add download/delete buttons to the UI. This
+   deviates from the spec but gives users more control.
+
+  Want me to implement one of these approaches?
+
+✻ Sautéed for 1m 9s

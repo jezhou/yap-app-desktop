@@ -195,6 +195,7 @@ async fn run_transcription_pipeline(
     }
 
     // Check for "no speech detected" condition
+    // Stub uses confidence -1.0 as sentinel, so == 0.0 correctly excludes it
     let no_speech = result.segments.is_empty()
         || (result.segments.len() == 1 && result.segments[0].confidence == 0.0);
     if no_speech {
@@ -202,7 +203,7 @@ async fn run_transcription_pipeline(
             "transcription-no-speech",
             json!({
                 "conversationId": conversation_id,
-                "message": "No speech was detected in this recording."
+                "message": "No speech detected in this recording."
             }),
         );
     }

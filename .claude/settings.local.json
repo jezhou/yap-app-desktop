@@ -10,7 +10,10 @@
       "Bash(python3:*)",
       "WebSearch",
       "WebFetch(domain:bundlephobia.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(pnpm install:*)",
+      "Bash(CI=true pnpm install:*)",
+      "Bash(source:*)"
     ]
   }
 }

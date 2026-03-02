@@ -541,7 +541,7 @@ fn transcribe_stub(
         text: "Transcription will appear here once a model is downloaded.".to_string(),
         start_time: 0.0,
         end_time: 5.0,
-        confidence: 0.0,
+        confidence: -1.0, // Sentinel: distinguishes stub from real no-speech (which uses 0.0)
     }];
 
     let full_text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
