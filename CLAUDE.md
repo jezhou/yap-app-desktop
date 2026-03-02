@@ -136,6 +136,10 @@ If there are bugs caught by QA or the designer, or some aspect of the spec is no
 
 Every task flows: **Developer → Architect review → QA tests → Designer review (if UI)**. No task is complete until all applicable reviewers sign off. Developers work in parallel lanes (backend/frontend). Phase gates block advancement until checkpoints pass.
 
+### No Stubs Marked Complete
+
+A task that says "Implement X" is not complete if the code returns placeholder or hardcoded data. Before any task is marked done, the architect (Kai) must verify there are no stub markers (`TODO`, `placeholder`, `stub`, `will be replaced`, `simulate`, `fake`) in the production code touched by that task. Tasks involving external integrations (model inference, HTTP downloads, hardware access) must include a functional acceptance criterion that a stub cannot satisfy.
+
 Full personas and interaction protocols: `.claude/team-personas.md`
 
 <!-- MANUAL ADDITIONS END -->

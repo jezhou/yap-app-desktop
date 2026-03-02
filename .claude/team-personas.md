@@ -280,8 +280,17 @@ Lessons learned from the 001-voice-transcription sprint. Apply these in future s
 
 9. **Commit and push regularly with agent attribution.** Establish this cadence from the start. Group logically related changes and note which agents contributed in the commit message.
 
+### Stub & Placeholder Detection
+
+10. **Never mark a task complete if the implementation is a stub.** If a task says "Implement X" and the code returns placeholder/hardcoded data, the task is NOT complete — it's scaffolded. The task description is the acceptance criterion: if it says "run STT", the code must actually run STT, not return fake text.
+
+11. **Kai must grep for stub markers before approving any task.** Search for: `TODO`, `placeholder`, `stub`, `will be replaced`, `simulate`, `fake`, `hardcoded`, `mock` (outside of test files). Any hit in production code means the task is incomplete. No exceptions.
+
+12. **Tasks that involve external integrations must have a functional acceptance criterion.** In `tasks.md`, these tasks should specify a verification that can't be satisfied by a stub. Example: "Acceptance: transcribing a real .wav produces non-placeholder text." Maya adds these criteria when creating tasks from `tasks.md`.
+
 ### Common Bug Patterns to Watch For
 
+- **Stubs marked as complete** — code returns hardcoded/placeholder data but task is checked off. Always verify with `grep -r "placeholder\|stub\|TODO\|will be replaced" src-tauri/src/ --include="*.rs"` (excluding test files)
 - Delete operations clean up DB rows (CASCADE) but orphan filesystem artifacts and index entries
 - Rust/TypeScript serde naming mismatches (`camelCase` vs `snake_case`, `rename_all` attributes)
 - Return type shape mismatches (object vs array, flat map vs structured)
