@@ -9,33 +9,34 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-/// Whisper-medium model files for auto-download.
-const WHISPER_MEDIUM_FILES: &[(&str, &str)] = &[
+/// Whisper-small model files for auto-download (default model).
+const WHISPER_DEFAULT_NAME: &str = "whisper-small";
+const WHISPER_DEFAULT_FILES: &[(&str, &str)] = &[
     (
-        "medium-encoder.int8.onnx",
-        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/medium-encoder.int8.onnx",
+        "small-encoder.int8.onnx",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-encoder.int8.onnx",
     ),
     (
-        "medium-decoder.int8.onnx",
-        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/medium-decoder.int8.onnx",
+        "small-decoder.int8.onnx",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-decoder.int8.onnx",
     ),
     (
-        "medium-tokens.txt",
-        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/medium-tokens.txt",
+        "small-tokens.txt",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-tokens.txt",
     ),
 ];
 
 /// Download default models in background if not already present.
-/// Downloads whisper-medium (STT) and diarization models.
+/// Downloads whisper-small (STT) and diarization models.
 /// Non-fatal: transcription falls back to stub when no STT model present,
 /// and works without diarization (single speaker fallback).
 ///
 /// Uses std::thread::spawn with its own Tokio runtime because the Tauri setup()
 /// closure runs in a synchronous context with no active Tokio reactor.
-fn spawn_model_downloads(models_dir: PathBuf) {
+fn spawn_model_downloads(app_handle: tauri::AppHandle, models_dir: PathBuf) {
     let seg_dir = models_dir.join("pyannote-segmentation");
     let emb_dir = models_dir.join("3dspeaker-embedding");
-    let whisper_dir = models_dir.join("whisper-medium");
+    let whisper_dir = models_dir.join(WHISPER_DEFAULT_NAME);
 
     let seg_model = seg_dir.join("model.onnx");
     let emb_model_exists = emb_dir.is_dir()
@@ -50,7 +51,7 @@ fn spawn_model_downloads(models_dir: PathBuf) {
     let need_seg = !seg_model.exists();
     let need_emb = !emb_model_exists;
     let need_whisper = !whisper_dir.is_dir()
-        || !WHISPER_MEDIUM_FILES
+        || !WHISPER_DEFAULT_FILES
             .iter()
             .all(|(filename, _)| whisper_dir.join(filename).exists());
 
@@ -70,13 +71,13 @@ fn spawn_model_downloads(models_dir: PathBuf) {
         rt.block_on(async move {
             let client = reqwest::Client::new();
 
-            // Download whisper-medium STT model files
+            // Download whisper-small STT model files
             if need_whisper {
-                eprintln!("auto-downloading whisper-medium model...");
-                if let Err(e) = download_whisper_medium(&client, &whisper_dir).await {
-                    eprintln!("failed to download whisper-medium model (non-fatal): {}", e);
+                eprintln!("auto-downloading whisper-small model...");
+                if let Err(e) = download_whisper_default(&client, &whisper_dir, &app_handle).await {
+                    eprintln!("failed to download whisper-small model (non-fatal): {}", e);
                 } else {
-                    eprintln!("whisper-medium model downloaded successfully");
+                    eprintln!("whisper-small model downloaded successfully");
                 }
             }
 
@@ -103,24 +104,31 @@ fn spawn_model_downloads(models_dir: PathBuf) {
     });
 }
 
-/// Download whisper-medium model files (encoder, decoder, tokens).
-async fn download_whisper_medium(
+/// Download default whisper model files (encoder, decoder, tokens) with progress events.
+async fn download_whisper_default(
     client: &reqwest::Client,
     dest_dir: &PathBuf,
+    app_handle: &tauri::AppHandle,
 ) -> Result<(), String> {
     use futures_util::StreamExt;
+    use serde_json::json;
+    use tauri::Emitter;
     use tokio::io::AsyncWriteExt;
 
     std::fs::create_dir_all(dest_dir)
         .map_err(|e| format!("failed to create dir: {}", e))?;
 
-    for (filename, url) in WHISPER_MEDIUM_FILES {
+    let total_files = WHISPER_DEFAULT_FILES.len() as f64;
+
+    for (i, (filename, url)) in WHISPER_DEFAULT_FILES.iter().enumerate() {
         let dest = dest_dir.join(filename);
         if dest.exists() {
             continue;
         }
 
         eprintln!("  downloading {}...", filename);
+        let file_base_pct = (i as f64 / total_files) * 100.0;
+        let file_range = 100.0 / total_files;
 
         let mut tmp_name = dest.as_os_str().to_os_string();
         tmp_name.push(".downloading");
@@ -136,16 +144,40 @@ async fn download_whisper_medium(
             return Err(format!("HTTP {} for {}", response.status(), url));
         }
 
+        let total_size = response.content_length().unwrap_or(0);
+        let mut downloaded: u64 = 0;
+
         let mut file = tokio::fs::File::create(&tmp_path)
             .await
             .map_err(|e| format!("failed to create file: {}", e))?;
 
         let mut stream = response.bytes_stream();
+        let mut last_emitted_pct: i32 = -1;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("download error: {}", e))?;
             file.write_all(&chunk)
                 .await
                 .map_err(|e| format!("write error: {}", e))?;
+            downloaded += chunk.len() as u64;
+
+            // Emit progress at 1% increments
+            let file_pct = if total_size > 0 {
+                downloaded as f64 / total_size as f64
+            } else {
+                0.0
+            };
+            let overall_pct = (file_base_pct + (file_pct * file_range)).min(99.0);
+            let rounded = overall_pct.round() as i32;
+            if rounded > last_emitted_pct {
+                last_emitted_pct = rounded;
+                let _ = app_handle.emit(
+                    "model-download-progress",
+                    json!({
+                        "modelName": WHISPER_DEFAULT_NAME,
+                        "percent": rounded,
+                    }),
+                );
+            }
         }
 
         file.flush()
@@ -159,6 +191,15 @@ async fn download_whisper_medium(
 
         eprintln!("  {} done", filename);
     }
+
+    // Emit 100% completion
+    let _ = app_handle.emit(
+        "model-download-progress",
+        json!({
+            "modelName": WHISPER_DEFAULT_NAME,
+            "percent": 100,
+        }),
+    );
 
     Ok(())
 }
@@ -316,7 +357,7 @@ pub fn run() {
             app.manage(transcription_state);
 
             // Auto-download default models in background (non-fatal if fails)
-            spawn_model_downloads(models_dir);
+            spawn_model_downloads(app.handle().clone(), models_dir);
 
             Ok(())
         })
