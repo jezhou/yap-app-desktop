@@ -9,14 +9,33 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-/// Download diarization models in background if not already present.
-/// Non-fatal: transcription works without diarization (single speaker fallback).
+/// Whisper-medium model files for auto-download.
+const WHISPER_MEDIUM_FILES: &[(&str, &str)] = &[
+    (
+        "medium-encoder.int8.onnx",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/medium-encoder.int8.onnx",
+    ),
+    (
+        "medium-decoder.int8.onnx",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/medium-decoder.int8.onnx",
+    ),
+    (
+        "medium-tokens.txt",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/medium-tokens.txt",
+    ),
+];
+
+/// Download default models in background if not already present.
+/// Downloads whisper-medium (STT) and diarization models.
+/// Non-fatal: transcription falls back to stub when no STT model present,
+/// and works without diarization (single speaker fallback).
 ///
 /// Uses std::thread::spawn with its own Tokio runtime because the Tauri setup()
 /// closure runs in a synchronous context with no active Tokio reactor.
-fn spawn_diarization_download(models_dir: PathBuf) {
+fn spawn_model_downloads(models_dir: PathBuf) {
     let seg_dir = models_dir.join("pyannote-segmentation");
     let emb_dir = models_dir.join("3dspeaker-embedding");
+    let whisper_dir = models_dir.join("whisper-medium");
 
     let seg_model = seg_dir.join("model.onnx");
     let emb_model_exists = emb_dir.is_dir()
@@ -30,8 +49,12 @@ fn spawn_diarization_download(models_dir: PathBuf) {
 
     let need_seg = !seg_model.exists();
     let need_emb = !emb_model_exists;
+    let need_whisper = !whisper_dir.is_dir()
+        || !WHISPER_MEDIUM_FILES
+            .iter()
+            .all(|(filename, _)| whisper_dir.join(filename).exists());
 
-    if !need_seg && !need_emb {
+    if !need_seg && !need_emb && !need_whisper {
         return;
     }
 
@@ -39,13 +62,23 @@ fn spawn_diarization_download(models_dir: PathBuf) {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
             Err(e) => {
-                eprintln!("failed to create runtime for diarization download: {}", e);
+                eprintln!("failed to create runtime for model downloads: {}", e);
                 return;
             }
         };
 
         rt.block_on(async move {
             let client = reqwest::Client::new();
+
+            // Download whisper-medium STT model files
+            if need_whisper {
+                eprintln!("auto-downloading whisper-medium model...");
+                if let Err(e) = download_whisper_medium(&client, &whisper_dir).await {
+                    eprintln!("failed to download whisper-medium model (non-fatal): {}", e);
+                } else {
+                    eprintln!("whisper-medium model downloaded successfully");
+                }
+            }
 
             // Download pyannote segmentation model (tar.bz2 archive)
             if need_seg {
@@ -68,6 +101,66 @@ fn spawn_diarization_download(models_dir: PathBuf) {
             }
         });
     });
+}
+
+/// Download whisper-medium model files (encoder, decoder, tokens).
+async fn download_whisper_medium(
+    client: &reqwest::Client,
+    dest_dir: &PathBuf,
+) -> Result<(), String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    std::fs::create_dir_all(dest_dir)
+        .map_err(|e| format!("failed to create dir: {}", e))?;
+
+    for (filename, url) in WHISPER_MEDIUM_FILES {
+        let dest = dest_dir.join(filename);
+        if dest.exists() {
+            continue;
+        }
+
+        eprintln!("  downloading {}...", filename);
+
+        let mut tmp_name = dest.as_os_str().to_os_string();
+        tmp_name.push(".downloading");
+        let tmp_path = std::path::PathBuf::from(tmp_name);
+
+        let response = client
+            .get(*url)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed for {}: {}", filename, e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for {}", response.status(), url));
+        }
+
+        let mut file = tokio::fs::File::create(&tmp_path)
+            .await
+            .map_err(|e| format!("failed to create file: {}", e))?;
+
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("download error: {}", e))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("write error: {}", e))?;
+        }
+
+        file.flush()
+            .await
+            .map_err(|e| format!("flush error: {}", e))?;
+        drop(file);
+
+        tokio::fs::rename(&tmp_path, &dest)
+            .await
+            .map_err(|e| format!("rename error: {}", e))?;
+
+        eprintln!("  {} done", filename);
+    }
+
+    Ok(())
 }
 
 /// Download and extract pyannote segmentation model from tar.bz2 archive.
@@ -222,8 +315,8 @@ pub fn run() {
                 Arc::new(commands::transcription::TranscriptionState::new());
             app.manage(transcription_state);
 
-            // Auto-download diarization models in background (non-fatal if fails)
-            spawn_diarization_download(models_dir);
+            // Auto-download default models in background (non-fatal if fails)
+            spawn_model_downloads(models_dir);
 
             Ok(())
         })
