@@ -11,6 +11,9 @@ use tokio::sync::Mutex;
 
 /// Download diarization models in background if not already present.
 /// Non-fatal: transcription works without diarization (single speaker fallback).
+///
+/// Uses std::thread::spawn with its own Tokio runtime because the Tauri setup()
+/// closure runs in a synchronous context with no active Tokio reactor.
 fn spawn_diarization_download(models_dir: PathBuf) {
     let seg_dir = models_dir.join("pyannote-segmentation");
     let emb_dir = models_dir.join("3dspeaker-embedding");
@@ -32,28 +35,38 @@ fn spawn_diarization_download(models_dir: PathBuf) {
         return;
     }
 
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-
-        // Download pyannote segmentation model (tar.bz2 archive)
-        if need_seg {
-            eprintln!("auto-downloading pyannote segmentation model...");
-            if let Err(e) = download_segmentation_model(&client, &seg_dir).await {
-                eprintln!("failed to download segmentation model (non-fatal): {}", e);
-            } else {
-                eprintln!("pyannote segmentation model downloaded successfully");
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("failed to create runtime for diarization download: {}", e);
+                return;
             }
-        }
+        };
 
-        // Download 3dspeaker embedding model (single .onnx file)
-        if need_emb {
-            eprintln!("auto-downloading 3dspeaker embedding model...");
-            if let Err(e) = download_embedding_model(&client, &emb_dir).await {
-                eprintln!("failed to download embedding model (non-fatal): {}", e);
-            } else {
-                eprintln!("3dspeaker embedding model downloaded successfully");
+        rt.block_on(async move {
+            let client = reqwest::Client::new();
+
+            // Download pyannote segmentation model (tar.bz2 archive)
+            if need_seg {
+                eprintln!("auto-downloading pyannote segmentation model...");
+                if let Err(e) = download_segmentation_model(&client, &seg_dir).await {
+                    eprintln!("failed to download segmentation model (non-fatal): {}", e);
+                } else {
+                    eprintln!("pyannote segmentation model downloaded successfully");
+                }
             }
-        }
+
+            // Download 3dspeaker embedding model (single .onnx file)
+            if need_emb {
+                eprintln!("auto-downloading 3dspeaker embedding model...");
+                if let Err(e) = download_embedding_model(&client, &emb_dir).await {
+                    eprintln!("failed to download embedding model (non-fatal): {}", e);
+                } else {
+                    eprintln!("3dspeaker embedding model downloaded successfully");
+                }
+            }
+        });
     });
 }
 
