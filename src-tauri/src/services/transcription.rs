@@ -251,11 +251,21 @@ fn find_file_matching(dir: &Path, substring: &str) -> Option<PathBuf> {
     })
 }
 
-/// Run Whisper STT on 16kHz mono samples.
+/// Maximum chunk duration for Whisper (sherpa-onnx has a 30s hard limit).
+const WHISPER_CHUNK_SECS: usize = 30;
+/// Samples per Whisper chunk at 16kHz.
+const WHISPER_CHUNK_SAMPLES: usize = WHISPER_CHUNK_SECS * TARGET_SAMPLE_RATE as usize;
+
+/// Run Whisper STT on 16kHz mono samples, chunking into 30-second segments.
+///
+/// sherpa-onnx's Whisper implementation has a 30-second hard limit.
+/// This function splits longer audio into 30s chunks, processes each one,
+/// and merges the results with adjusted timestamps.
 fn run_whisper_stt(
     samples: &[f32],
     whisper_dir: &Path,
     cancel: &AtomicBool,
+    on_progress: &Option<ProgressCallback>,
 ) -> Result<OfflineRecognizerResult> {
     if cancel.load(Ordering::Relaxed) {
         anyhow::bail!("transcription cancelled");
@@ -289,18 +299,87 @@ fn run_whisper_stt(
         anyhow::bail!("transcription cancelled");
     }
 
-    let result = recognizer.transcribe(TARGET_SAMPLE_RATE, samples);
-    Ok(result)
+    // If audio fits in one chunk, process directly
+    if samples.len() <= WHISPER_CHUNK_SAMPLES {
+        let result = recognizer.transcribe(TARGET_SAMPLE_RATE, samples);
+        return Ok(result);
+    }
+
+    // Split into 30-second chunks and process each
+    let chunks: Vec<&[f32]> = samples.chunks(WHISPER_CHUNK_SAMPLES).collect();
+    let total_chunks = chunks.len();
+    eprintln!("[whisper] splitting {:.1}s audio into {} chunks of {}s each",
+        samples.len() as f64 / TARGET_SAMPLE_RATE as f64, total_chunks, WHISPER_CHUNK_SECS);
+
+    let mut all_tokens: Vec<String> = Vec::new();
+    let mut all_timestamps: Vec<f32> = Vec::new();
+    let mut all_text = String::new();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            anyhow::bail!("transcription cancelled");
+        }
+
+        let chunk_offset_secs = (i * WHISPER_CHUNK_SECS) as f32;
+        eprintln!("[whisper] processing chunk {}/{} (offset {:.0}s)...", i + 1, total_chunks, chunk_offset_secs);
+
+        let result = recognizer.transcribe(TARGET_SAMPLE_RATE, chunk);
+
+        // Adjust timestamps by chunk offset and accumulate
+        for (j, token) in result.tokens.iter().enumerate() {
+            all_tokens.push(token.clone());
+            let ts = if j < result.timestamps.len() {
+                result.timestamps[j] + chunk_offset_secs
+            } else {
+                chunk_offset_secs
+            };
+            all_timestamps.push(ts);
+        }
+
+        if !result.text.is_empty() {
+            if !all_text.is_empty() {
+                all_text.push(' ');
+            }
+            all_text.push_str(result.text.trim());
+        }
+
+        // Emit progress within the STT phase (20-70%)
+        if let Some(ref cb) = on_progress {
+            let stt_pct = 20.0 + (50.0 * (i + 1) as f64 / total_chunks as f64);
+            cb(stt_pct);
+        }
+    }
+
+    eprintln!("[whisper] all chunks done: {} tokens total", all_tokens.len());
+
+    Ok(OfflineRecognizerResult {
+        lang: "en".to_string(),
+        text: all_text,
+        tokens: all_tokens,
+        timestamps: all_timestamps,
+    })
 }
+
+/// Maximum audio duration for diarization (10 minutes at 16kHz).
+/// Longer audio would take too long or exhaust memory on CPU.
+const DIARIZATION_MAX_SAMPLES: usize = 10 * 60 * TARGET_SAMPLE_RATE as usize;
 
 /// Run speaker diarization on 16kHz mono samples.
 /// Returns None if diarization models are not available (graceful degradation).
+/// Skips diarization for audio longer than 10 minutes to avoid hanging.
 fn run_diarization(
     samples: Vec<f32>,
     model_dir: &Path,
     cancel: &AtomicBool,
 ) -> Option<Vec<Segment>> {
     if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    // Skip diarization for very long audio — it would take too long on CPU
+    if samples.len() > DIARIZATION_MAX_SAMPLES {
+        let duration_mins = samples.len() as f64 / TARGET_SAMPLE_RATE as f64 / 60.0;
+        eprintln!("[diarization] skipping: audio is {:.1} minutes (max 10 minutes for diarization)", duration_mins);
         return None;
     }
 
@@ -325,6 +404,8 @@ fn run_diarization(
         return None;
     }
 
+    eprintln!("[diarization] starting ({:.1}s of audio)...", samples.len() as f64 / TARGET_SAMPLE_RATE as f64);
+
     let config = DiarizeConfig {
         num_clusters: None, // auto-detect number of speakers
         threshold: Some(0.5),
@@ -334,9 +415,12 @@ fn run_diarization(
     let mut diarizer = Diarize::new(&seg_model, &emb_model, config).ok()?;
 
     match diarizer.compute(samples, None) {
-        Ok(segments) => Some(segments),
+        Ok(segments) => {
+            eprintln!("[diarization] found {} speaker segments", segments.len());
+            Some(segments)
+        }
         Err(e) => {
-            eprintln!("diarization failed (non-fatal): {}", e);
+            eprintln!("[diarization] failed (non-fatal): {}", e);
             None
         }
     }
@@ -629,7 +713,7 @@ fn transcribe_sync(
     // Phase 2: Whisper STT (20-70%)
     eprintln!("[transcription] phase 2: running whisper STT (this may take a while)...");
     let stt_start = std::time::Instant::now();
-    let stt_result = run_whisper_stt(&samples, &whisper_dir, &cancel)?;
+    let stt_result = run_whisper_stt(&samples, &whisper_dir, &cancel, &on_progress)?;
     eprintln!("[transcription] whisper STT completed in {:.1}s, {} tokens", stt_start.elapsed().as_secs_f64(), stt_result.tokens.len());
 
     if cancel.load(Ordering::Relaxed) {
