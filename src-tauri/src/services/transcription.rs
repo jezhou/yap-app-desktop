@@ -65,16 +65,21 @@ pub async fn transcribe_audio(
 fn load_audio_samples(audio_path: &Path) -> Result<Vec<f32>> {
     let file = File::open(audio_path)
         .with_context(|| format!("failed to open audio file: {}", audio_path.display()))?;
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    eprintln!("[audio-load] opening file: {} ({} bytes)", audio_path.display(), file_len);
+
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
     if let Some(ext) = audio_path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
+        eprintln!("[audio-load] format hint: {}", ext);
     }
 
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
         .context("failed to probe audio format")?;
+    eprintln!("[audio-load] probed successfully");
 
     let mut format_reader = probed.format;
     let track = format_reader
@@ -91,12 +96,16 @@ fn load_audio_samples(audio_path: &Path) -> Result<Vec<f32>> {
         .map(|c| c.count())
         .unwrap_or(1);
 
+    eprintln!("[audio-load] track: {}Hz, {} channels, codec={:?}", source_sample_rate, channels, track.codec_params.codec);
+
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .context("failed to create audio decoder")?;
+    eprintln!("[audio-load] decoder created, decoding packets...");
 
     // Decode all packets into interleaved f32 samples
     let mut all_samples: Vec<f32> = Vec::new();
+    let mut packet_count: u64 = 0;
     loop {
         let packet = match format_reader.next_packet() {
             Ok(p) => p,
@@ -105,21 +114,29 @@ fn load_audio_samples(audio_path: &Path) -> Result<Vec<f32>> {
             {
                 break;
             }
-            Err(_) => break,
+            Err(e) => {
+                eprintln!("[audio-load] packet read ended: {}", e);
+                break;
+            }
         };
         if packet.track_id() != track.id {
             continue;
         }
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("[audio-load] decode error on packet {}: {}", packet_count, e);
+                continue;
+            }
         };
         let spec = *decoded.spec();
         let num_frames = decoded.capacity();
         let mut sample_buf = SampleBuffer::<f32>::new(num_frames as u64, spec);
         sample_buf.copy_interleaved_ref(decoded);
         all_samples.extend_from_slice(sample_buf.samples());
+        packet_count += 1;
     }
+    eprintln!("[audio-load] decoded {} packets, {} raw samples", packet_count, all_samples.len());
 
     if all_samples.is_empty() {
         anyhow::bail!("no audio samples decoded from file");
@@ -134,12 +151,15 @@ fn load_audio_samples(audio_path: &Path) -> Result<Vec<f32>> {
     } else {
         all_samples
     };
+    eprintln!("[audio-load] mono samples: {}", mono_samples.len());
 
     // Resample to 16kHz if needed
     if source_sample_rate == TARGET_SAMPLE_RATE {
+        eprintln!("[audio-load] already at 16kHz, no resampling needed");
         return Ok(mono_samples);
     }
 
+    eprintln!("[audio-load] resampling from {}Hz to {}Hz...", source_sample_rate, TARGET_SAMPLE_RATE);
     let params = SincInterpolationParameters {
         sinc_len: 256,
         f_cutoff: 0.95,
@@ -162,7 +182,8 @@ fn load_audio_samples(audio_path: &Path) -> Result<Vec<f32>> {
     let mut resampled: Vec<f32> = Vec::with_capacity((mono_samples.len() as f64 * ratio) as usize + 1024);
 
     // Process in chunks
-    for chunk in mono_samples.chunks(chunk_size) {
+    let total_chunks = (mono_samples.len() + chunk_size - 1) / chunk_size;
+    for (chunk_idx, chunk) in mono_samples.chunks(chunk_size).enumerate() {
         let input = if chunk.len() < chunk_size {
             // Pad last chunk with zeros
             let mut padded = chunk.to_vec();
@@ -178,11 +199,12 @@ fn load_audio_samples(audio_path: &Path) -> Result<Vec<f32>> {
                 }
             }
             Err(e) => {
-                eprintln!("resampler warning: {}", e);
+                eprintln!("[audio-load] resampler error at chunk {}/{}: {}", chunk_idx, total_chunks, e);
                 break;
             }
         }
     }
+    eprintln!("[audio-load] resampling done: {} -> {} samples", mono_samples.len(), resampled.len());
 
     // Trim to expected length (rubato may produce extra samples from padding)
     let expected_len = (mono_samples.len() as f64 * ratio) as usize;
@@ -216,11 +238,12 @@ fn has_whisper_files(dir: &Path) -> bool {
     has_encoder && has_decoder && has_tokens
 }
 
-/// Find a file in a directory whose name contains the given substring and ends with .onnx or .txt.
+/// Find a file in a directory whose name contains the given substring.
+/// Excludes temporary `.downloading` files from in-progress downloads.
 fn find_file_matching(dir: &Path, substring: &str) -> Option<PathBuf> {
     std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).find_map(|entry| {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.contains(substring) {
+        if name.contains(substring) && !name.ends_with(".downloading") {
             Some(entry.path())
         } else {
             None
@@ -704,8 +727,64 @@ pub async fn update_conversation_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::NamedTempFile;
+
+    /// Create a valid WAV file with a sine wave for testing audio loading.
+    fn create_test_wav(sample_rate: u32, duration_secs: f32, channels: u16) -> NamedTempFile {
+        let tmp = tempfile::Builder::new()
+            .suffix(".wav")
+            .tempfile()
+            .unwrap();
+        let spec = hound::WavSpec {
+            channels,
+            sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(tmp.path(), spec).unwrap();
+        let num_samples = (sample_rate as f32 * duration_secs) as usize;
+        for i in 0..num_samples {
+            let t = i as f32 / sample_rate as f32;
+            let sample = (t * 440.0 * 2.0 * std::f32::consts::PI).sin();
+            let amplitude = (sample * i16::MAX as f32) as i16;
+            for _ in 0..channels {
+                writer.write_sample(amplitude).unwrap();
+            }
+        }
+        writer.finalize().unwrap();
+        tmp
+    }
+
+    #[test]
+    fn test_load_audio_samples_wav_16khz_mono() {
+        let wav = create_test_wav(16000, 2.0, 1);
+        let samples = load_audio_samples(wav.path()).unwrap();
+        // 2 seconds at 16kHz = 32000 samples
+        assert!((samples.len() as i64 - 32000).abs() < 100, "expected ~32000 samples, got {}", samples.len());
+    }
+
+    #[test]
+    fn test_load_audio_samples_wav_44100_stereo_resample() {
+        let wav = create_test_wav(44100, 2.0, 2);
+        let samples = load_audio_samples(wav.path()).unwrap();
+        // 2 seconds at 16kHz after resampling = ~32000 samples
+        assert!((samples.len() as i64 - 32000).abs() < 500, "expected ~32000 samples, got {}", samples.len());
+    }
+
+    #[test]
+    fn test_load_audio_samples_wav_48khz_stereo_resample() {
+        let wav = create_test_wav(48000, 3.0, 2);
+        let samples = load_audio_samples(wav.path()).unwrap();
+        // 3 seconds at 16kHz = ~48000 samples
+        assert!((samples.len() as i64 - 48000).abs() < 500, "expected ~48000 samples, got {}", samples.len());
+    }
+
+    #[test]
+    fn test_load_audio_samples_empty_file() {
+        let tmp = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
+        let result = load_audio_samples(tmp.path());
+        assert!(result.is_err());
+    }
 
     #[tokio::test]
     async fn test_transcribe_audio_file_not_found() {
