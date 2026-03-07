@@ -49,7 +49,7 @@ pub async fn upload_audio(
         .await
         .map_err(|e| format!("failed to copy audio file: {}", e))?;
 
-    // Get file duration using symphonia (best-effort)
+    // Get file duration using rodio (best-effort)
     let dest_clone = dest_path.clone();
     let duration = tokio::task::spawn_blocking(move || get_audio_duration(&dest_clone))
         .await
@@ -111,57 +111,25 @@ pub async fn upload_audio(
     Ok(response)
 }
 
-/// Get audio file duration using symphonia.
+/// Get audio file duration using rodio's decoder.
 fn get_audio_duration(path: &PathBuf) -> f64 {
+    use rodio::Source;
     use std::fs::File;
-    use symphonia::core::formats::FormatOptions;
-    use symphonia::core::io::MediaSourceStream;
-    use symphonia::core::meta::MetadataOptions;
-    use symphonia::core::probe::Hint;
+    use std::io::BufReader;
 
     let file = match File::open(path) {
         Ok(f) => f,
         Err(_) => return 0.0,
     };
 
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
+    let reader = BufReader::new(file);
+    match rodio::Decoder::new(reader) {
+        Ok(decoder) => decoder
+            .total_duration()
+            .map(|d: std::time::Duration| d.as_secs_f64())
+            .unwrap_or(0.0),
+        Err(_) => 0.0,
     }
-
-    let probed = match symphonia::default::get_probe().format(
-        &hint,
-        mss,
-        &FormatOptions::default(),
-        &MetadataOptions::default(),
-    ) {
-        Ok(p) => p,
-        Err(_) => return 0.0,
-    };
-
-    let format = probed.format;
-
-    // Try to get duration from the default track
-    if let Some(track) = format.default_track() {
-        if let Some(n_frames) = track.codec_params.n_frames {
-            if let Some(sample_rate) = track.codec_params.sample_rate {
-                if sample_rate > 0 {
-                    return n_frames as f64 / sample_rate as f64;
-                }
-            }
-        }
-        // Try time_base
-        if let Some(tb) = track.codec_params.time_base {
-            if let Some(n_frames) = track.codec_params.n_frames {
-                let time = tb.calc_time(n_frames);
-                return time.seconds as f64 + time.frac;
-            }
-        }
-    }
-
-    0.0
 }
 
 #[tauri::command]

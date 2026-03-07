@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use crate::db::Database;
@@ -57,50 +57,23 @@ pub async fn start_transcription(
         path
     };
 
-    // Resolve model directory and check that a model is downloaded
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data dir: {}", e))?;
-    let model_dir = app_data_dir.join("models");
-
-    // Check if any STT model is downloaded
-    {
+    // Check that a Deepgram API key is configured
+    let api_key = {
         let db_lock = db.lock().await;
+        let key = crate::services::settings::get_setting(db_lock.pool(), "deepgram_api_key")
+            .await
+            .map_err(|e| e.to_string())?;
 
-        // Check if user has a selected model in settings
-        let selected_model: Option<String> =
-            crate::services::settings::get_setting(db_lock.pool(), "selectedModel")
-                .await
-                .map_err(|e| e.to_string())?;
-
-        let has_model = if let Some(ref model_name) = selected_model {
-            // Check if the specifically selected model is downloaded
-            model_dir.join(model_name).is_dir()
-        } else {
-            // No model selected — check if any whisper model directory exists
-            model_dir.is_dir()
-                && std::fs::read_dir(&model_dir)
-                    .map(|entries| {
-                        entries.filter_map(|e| e.ok()).any(|entry| {
-                            entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
-                                && entry
-                                    .file_name()
-                                    .to_str()
-                                    .map(|n| n.starts_with("whisper-"))
-                                    .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-        };
-
-        if !has_model {
-            return Err(
-                "ModelNotDownloaded: please download a transcription model in Settings before transcribing"
-                    .to_string(),
-            );
+        match key {
+            Some(k) if !k.trim().is_empty() => k,
+            _ => {
+                return Err(
+                    "ApiKeyMissing: please configure your Deepgram API key in Settings before transcribing"
+                        .to_string(),
+                );
+            }
         }
-    }
+    };
 
     // Create cancellation token
     let cancel = Arc::new(AtomicBool::new(false));
@@ -132,7 +105,7 @@ pub async fn start_transcription(
             &db_state,
             &conv_id,
             &audio_file_path,
-            &model_dir,
+            &api_key,
             cancel,
         )
         .await;
@@ -157,13 +130,13 @@ pub async fn start_transcription(
     Ok(json!({ "status": "analyzing" }))
 }
 
-/// Run the full transcription pipeline: STT + diarization + summarization.
+/// Run the full transcription pipeline: Deepgram API + summarization.
 async fn run_transcription_pipeline(
     app: &AppHandle,
     db_state: &Arc<Mutex<Database>>,
     conversation_id: &str,
     audio_file_path: &str,
-    model_dir: &PathBuf,
+    api_key: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let conv_id = conversation_id.to_string();
@@ -180,10 +153,10 @@ async fn run_transcription_pipeline(
         );
     });
 
-    // Run transcription
+    // Run transcription via Deepgram
     let result = transcription_service::transcribe_audio(
         &PathBuf::from(audio_file_path),
-        model_dir,
+        api_key,
         cancel,
         Some(on_progress),
     )
@@ -199,7 +172,6 @@ async fn run_transcription_pipeline(
     }
 
     // Check for "no speech detected" condition
-    // Stub uses confidence -1.0 as sentinel, so == 0.0 correctly excludes it
     let no_speech = result.segments.is_empty()
         || (result.segments.len() == 1 && result.segments[0].confidence == 0.0);
     if no_speech {

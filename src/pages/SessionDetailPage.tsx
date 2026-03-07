@@ -70,9 +70,13 @@ export default function SessionDetailPage() {
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : String(err);
-            if (msg.includes("ModelNotDownloaded")) {
+            if (msg.includes("ApiKeyMissing")) {
               setError(
-                "Transcription model is still downloading. It will be ready shortly — please try again in a moment.",
+                "Please configure your Deepgram API key in Settings before transcribing.",
+              );
+            } else if (msg.includes("InvalidApiKey")) {
+              setError(
+                "Your Deepgram API key is invalid or expired. Please update it in Settings.",
               );
             } else {
               setError("Failed to start transcription.");

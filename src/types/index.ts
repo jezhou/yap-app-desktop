@@ -70,13 +70,6 @@ export interface SearchResult {
   rank: number;
 }
 
-export interface Model {
-  name: string;
-  size: string;
-  downloaded: boolean;
-  quality_tier: string;
-}
-
 // IPC command input/output types
 
 export interface UploadAudioInput {
@@ -125,12 +118,7 @@ export interface ConversationDetail {
   speakerRoles: SpeakerRole[];
 }
 
-export interface DiarizationStatus {
-  segmentationReady: boolean;
-  embeddingReady: boolean;
-}
-
-export interface ModelDownloadProgressEvent {
-  modelName: string;
-  percent: number;
+export interface ValidateApiKeyResult {
+  valid: boolean;
+  error?: string;
 }

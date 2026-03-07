@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-/// Supported audio file extensions (matching symphonia features in Cargo.toml).
+/// Supported audio file extensions (matching Deepgram's supported formats).
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "mp3", "wav", "ogg", "flac", "m4a", "aac", "mp4", "wma", "webm",
 ];
